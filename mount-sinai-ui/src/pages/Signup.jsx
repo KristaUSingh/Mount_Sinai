@@ -1,4 +1,5 @@
 import { useForm } from "react-hook-form";
+import { supabase } from "../api/supabaseClient"; 
 import { useNavigate } from "react-router-dom";
 import { useState } from "react";
 import {
@@ -13,26 +14,49 @@ import {
 
 function Signup() {
   const { register, handleSubmit } = useForm();
-  const navigate = useNavigate();
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const navigate = useNavigate();
 
-  const onSubmit = ({ email, password, role }) => {
+  const onSubmit = async ({ email, password, role }) => {
     // Dummy signup logic (no backend)
     if (!email || !password || !role) {
       setError("All fields are required");
       return;
     }
 
-    // Store user info temporarily (in localStorage for demo)
-    const newUser = { email, password, role };
-    localStorage.setItem("user", JSON.stringify(newUser));
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+      })
+
+      if (signUpError) throw signUpError
+
+      //FIX ME: ADD RLS policy and password requirements
+      //NEED to add name to ui 
+
+      // 2. Insert into your custom `users` table (extra info like role)
+      if (data.user) {
+        const { error: dbError } = await supabase.from("users").insert([
+          {
+            email,
+            user_id: data.user.id, // same as auth.users.id
+            role,
+            login_time: new Date(),
+          },
+        ])
+
+        if (dbError) throw dbError
+
+      }
+
 
     setSuccess("Signup successful! Redirecting to login...");
     setError("");
-
+      
     // Redirect after 2 sec
     setTimeout(() => navigate("/login"), 2000);
+  
   };
 
   return (

@@ -1,4 +1,5 @@
 import { useForm } from "react-hook-form";
+import { supabase } from "../api/supabaseClient"; 
 import { useNavigate } from "react-router-dom";
 import { useState } from "react";
 import {
@@ -16,22 +17,51 @@ function Login({ setAuth }) {
   const navigate = useNavigate();
   const [error, setError] = useState("");
 
-  const onSubmit = ({ email, password }) => {
-    // Get stored user (from localStorage, set during Signup)
-    const storedUser = JSON.parse(localStorage.getItem("user"));
+  const onSubmit = async ({ email, password }) => {
+    //resets any previous error messages
+    setError("");
 
-    if (!storedUser) {
-      setError("No user found. Please sign up first.");
-      return;
-    }
+    //signs in user using their email and password if account exists
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
 
-    if (storedUser.email === email && storedUser.password === password) {
-      setAuth({ isLoggedIn: true, role: storedUser.role });
+    //show error if they dont authnicate account of wrong password
 
-      navigate(storedUser.role === "admin" ? "/admin" : "/chat");
-    } else {
-      setError("Invalid email or password");
-    }
+    
+
+
+
+
+
+
+
+    const user = data.user;
+
+  const { data: userData, error: userError } = await supabase
+    .from("users")
+    .select("role")
+    .eq("user_id", user.id) // user.id matches the auth user’s ID
+    .single();
+
+  if (userError || !userData) {
+    setError("Unable to find user role. Please contact support.");
+    return;
+  }
+
+  const role = userData.role;
+
+  setAuth({ isLoggedIn: true, role });
+
+  if (role === "admin") {
+    navigate("/admin");
+  } else if (role === "agent") {
+    navigate("/chat");
+  } else {
+    setError("Unknown role. Please contact support.");
+  }
+
   };
 
   return (
