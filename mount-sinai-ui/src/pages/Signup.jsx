@@ -13,14 +13,33 @@ import {
 } from "@mui/material";
 
 function Signup() {
-  const { register, handleSubmit } = useForm();
+  const {register, handleSubmit } = useForm();
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const navigate = useNavigate();
 
+  
+  const test_password = (value) => {
+    //if password doesn't meet any requirements it returns a list of errors
+    const newErrors = [];
+    if (value.length < 8) newErrors.push("At least 8 characters");
+    if (!/[A-Z]/.test(value)) newErrors.push("At least one uppercase letter");
+    if (!/[a-z]/.test(value)) newErrors.push("At least one lowercase letter");
+    if (!/[0-9]/.test(value)) newErrors.push("At least one number");
+    if (!/[!@#$%^&*]/.test(value)) newErrors.push("At least one special character (!@#$%^&*)");
+
+    return newErrors;
+  };
+
   const onSubmit = async ({ firstName, lastName, email, password, role }) => {
     setError("");
     setSuccess("");
+
+    const check_password = test_password(password);
+    if (check_password.length > 0) {
+      setError("Password must include: " + check_password.join(", "));
+    return;
+    }
 
     if (!firstName || !lastName || !email || !password || !role) {
       setError("All fields are required");
@@ -62,7 +81,14 @@ function Signup() {
         "Signup successful! Please check your email to verify your account."
       );
       setError("");
-    } catch (err) {
+
+      //after two secs goes to login page
+      setTimeout(() => {
+      navigate("/Login");
+    }, 2000);
+    } 
+
+    catch (err) {
       console.error("Signup error:", err);
       setError(err.message || "Something went wrong during signup.");
     }

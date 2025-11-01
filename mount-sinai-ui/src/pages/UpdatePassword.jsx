@@ -18,18 +18,32 @@ function UpdatePassword() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
+  const test_password = (value) => {
+    //if password doesn't meet any requirements it returns a list of errors
+    const newErrors = [];
+    if (value.length < 8) newErrors.push("At least 8 characters");
+    if (!/[A-Z]/.test(value)) newErrors.push("At least one uppercase letter");
+    if (!/[a-z]/.test(value)) newErrors.push("At least one lowercase letter");
+    if (!/[0-9]/.test(value)) newErrors.push("At least one number");
+    if (!/[!@#$%^&*]/.test(value)) newErrors.push("At least one special character (!@#$%^&*)");
+
+    return newErrors;
+  };
+
   const handleUpdate = async (e) => {
     e.preventDefault();
     setError(null);
     setMessage(null);
 
-    if (password !== confirm) {
-      setError("Passwords do not match.");
-      return;
+    const check_password = test_password(password);
+
+    if (check_password.length > 0) {
+      setError("Password must include: " + check_password.join(", "));
+    return;
     }
 
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters.");
+    if (password !== confirm) {
+      setError("Passwords do not match.");
       return;
     }
 
@@ -75,6 +89,9 @@ function UpdatePassword() {
           Enter your new password below to reset your account.
         </Typography>
 
+        {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+        {message && <Alert severity="success" sx={{ mt: 2 }}>{message}</Alert>}
+
         <form onSubmit={handleUpdate}>
           <TextField
             label="New Password"
@@ -94,9 +111,6 @@ function UpdatePassword() {
             onChange={(e) => setConfirm(e.target.value)}
             required
           />
-
-          {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
-          {message && <Alert severity="success" sx={{ mt: 2 }}>{message}</Alert>}
 
           <Button
             type="submit"
