@@ -10,6 +10,7 @@ import {
   Paper,
   Alert,
 } from "@mui/material";
+import MSLogo from "../assets/MSLogo.png"; // Mount Sinai Logo
 
 function ResetPassword() {
   const { register, handleSubmit, formState: { errors } } = useForm();
@@ -25,7 +26,7 @@ function ResetPassword() {
 
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(data.email, {
-        redirectTo: "http://localhost:5173/update-password", // change this if deployed
+        redirectTo: "http://localhost:5173/update-password", // change if deployed
       });
 
       if (error) throw error;
@@ -42,22 +43,41 @@ function ResetPassword() {
   return (
     <Box
       sx={{
+        height: "100vh",
         display: "flex",
         justifyContent: "center",
         alignItems: "center",
-        height: "100vh",
-        backgroundColor: "#f5f5f5",
+        background: "linear-gradient(135deg, #E6F0FA 0%, #FFFFFF 100%)",
       }}
     >
       <Paper
-        elevation={4}
-        sx={{ p: 4, width: "100%", maxWidth: 400, textAlign: "center" }}
+        elevation={6}
+        sx={{
+          p: 4,
+          width: 400,
+          textAlign: "center",
+          borderRadius: 4,
+        }}
       >
-        <Typography variant="h5" gutterBottom>
+        {/* Mount Sinai Logo */}
+        <img
+          src={MSLogo}
+          alt="Mount Sinai Logo"
+          style={{ width: "120px", marginBottom: "20px" }}
+        />
+
+        <Typography
+          variant="h6"
+          sx={{
+            fontWeight: "bold",
+            color: "#002F6C",
+            mb: 1,
+          }}
+        >
           Reset Password
         </Typography>
 
-        <Typography variant="body2" sx={{ mb: 3 }}>
+        <Typography variant="body2" sx={{ color: "#555", mb: 3 }}>
           Enter your email address and we’ll send you a link to reset your password.
         </Typography>
 
@@ -76,20 +96,34 @@ function ResetPassword() {
 
           <Button
             type="submit"
-            variant="contained"
-            color="primary"
             fullWidth
-            sx={{ mt: 3 }}
+            sx={{
+              mt: 3,
+              py: 1,
+              fontWeight: "bold",
+              color: "white",
+              background: "linear-gradient(90deg, #002F6C, #642F6C)",
+              transition: "all 0.3s ease",
+              "&:hover": {
+                background: "linear-gradient(90deg, #E41C77, #00ADEF)",
+                transform: "scale(1.05)",
+              },
+            }}
             disabled={loading}
           >
-            {loading ? "Sending..." : "Send Reset Link"}
+            {loading ? "SENDING..." : "SEND RESET LINK"}
           </Button>
 
           <Button
             onClick={() => navigate("/login")}
-            color="secondary"
             fullWidth
-            sx={{ mt: 1 }}
+            sx={{
+              mt: 2,
+              fontWeight: 600,
+              color: "#E41C77",
+              textTransform: "uppercase",
+              "&:hover": { textDecoration: "underline" },
+            }}
           >
             Back to Login
           </Button>

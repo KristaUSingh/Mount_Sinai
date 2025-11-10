@@ -1,5 +1,5 @@
 import { useForm } from "react-hook-form";
-import { supabase } from "../api/supabaseClient"; 
+import { supabase } from "../api/supabaseClient";
 import { useNavigate } from "react-router-dom";
 import { useState } from "react";
 import {
@@ -11,23 +11,22 @@ import {
   Alert,
   MenuItem,
 } from "@mui/material";
+import MSLogo from "../assets/MSLogo.png";
 
 function Signup() {
-  const {register, handleSubmit } = useForm();
+  const { register, handleSubmit } = useForm();
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const navigate = useNavigate();
 
-  
   const test_password = (value) => {
-    //if password doesn't meet any requirements it returns a list of errors
     const newErrors = [];
     if (value.length < 8) newErrors.push("At least 8 characters");
     if (!/[A-Z]/.test(value)) newErrors.push("At least one uppercase letter");
     if (!/[a-z]/.test(value)) newErrors.push("At least one lowercase letter");
     if (!/[0-9]/.test(value)) newErrors.push("At least one number");
-    if (!/[!@#$%^&*]/.test(value)) newErrors.push("At least one special character (!@#$%^&*)");
-
+    if (!/[!@#$%^&*]/.test(value))
+      newErrors.push("At least one special character (!@#$%^&*)");
     return newErrors;
   };
 
@@ -38,29 +37,18 @@ function Signup() {
     const check_password = test_password(password);
     if (check_password.length > 0) {
       setError("Password must include: " + check_password.join(", "));
-    return;
-    }
-
-    if (!firstName || !lastName || !email || !password || !role) {
-      setError("All fields are required");
       return;
     }
 
     try {
-      // 1. Sign up with Supabase Auth and set redirect URL for email verification
-      const { data, error: signUpError } = await supabase.auth.signUp(
-        {
-          email,
-          password,
-          options: {
-            emailRedirectTo: "http://localhost:5173/login"
-          },
-        }
-      );
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { emailRedirectTo: "http://localhost:5173/login" },
+      });
 
       if (signUpError) throw signUpError;
 
-      // 2. Insert user info into your "users" table
       if (data.user) {
         const { error: dbError } = await supabase.from("users").insert([
           {
@@ -72,89 +60,67 @@ function Signup() {
             login_time: new Date(),
           },
         ]);
-
         if (dbError) throw dbError;
       }
 
-      // 3. Show success message
-      setSuccess(
-        "Signup successful! Please check your email to verify your account."
-      );
-      setError("");
-
-      //after two secs goes to login page
-      setTimeout(() => {
-      navigate("/Login");
-    }, 2000);
-    } 
-
-    catch (err) {
+      setSuccess("Signup successful! Please check your email to verify your account.");
+      setTimeout(() => navigate("/login"), 2000);
+    } catch (err) {
       console.error("Signup error:", err);
       setError(err.message || "Something went wrong during signup.");
     }
   };
 
   return (
-    <Box display="flex" justifyContent="center" alignItems="center" height="100vh">
-      <Paper elevation={3} sx={{ p: 4, width: 350 }}>
-        <Typography variant="h5" color="primary" gutterBottom>
-          Mount Sinai Signup
+    <Box
+      sx={{
+        height: "100vh",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        background: "linear-gradient(135deg, #E6F0FA 0%, #FFFFFF 100%)",
+      }}
+    >
+      <Paper elevation={5} sx={{ p: 4, width: 400, textAlign: "center", borderRadius: 4 }}>
+        <img
+          src={MSLogo}
+          alt="Mount Sinai Logo"
+          style={{ width: "130px", marginBottom: "20px" }}
+        />
+        <Typography variant="h6" sx={{ fontWeight: "bold", color: "#002F6C", mb: 2 }}>
+          Mount Sinai Radiology Signup
         </Typography>
 
-        {error && <Alert severity="error">{error}</Alert>}
-        {success && <Alert severity="success">{success}</Alert>}
+        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+        {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
 
         <form onSubmit={handleSubmit(onSubmit)}>
-          <TextField
-            {...register("firstName")}
-            label="First Name"
-            fullWidth
-            margin="normal"
-            required
-          />
-          <TextField
-            {...register("lastName")}
-            label="Last Name"
-            fullWidth
-            margin="normal"
-            required
-          />
-          <TextField
-            {...register("email")}
-            label="Email"
-            type="email"
-            fullWidth
-            margin="normal"
-            required
-          />
-          <TextField
-            {...register("password")}
-            label="Password"
-            type="password"
-            fullWidth
-            margin="normal"
-            required
-          />
-          <TextField
-            {...register("role")}
-            select
-            label="Role"
-            fullWidth
-            margin="normal"
-            required
-          >
+          <TextField {...register("firstName")} label="First Name" fullWidth margin="normal" required />
+          <TextField {...register("lastName")} label="Last Name" fullWidth margin="normal" required />
+          <TextField {...register("email")} label="Email" type="email" fullWidth margin="normal" required />
+          <TextField {...register("password")} label="Password" type="password" fullWidth margin="normal" required />
+          <TextField {...register("role")} select label="Role" fullWidth margin="normal" required>
             <MenuItem value="agent">Agent</MenuItem>
             <MenuItem value="admin">Admin</MenuItem>
           </TextField>
 
           <Button
             type="submit"
-            variant="contained"
-            color="secondary"
             fullWidth
-            sx={{ mt: 2 }}
+            sx={{
+              mt: 3,
+              py: 1,
+              fontWeight: "bold",
+              color: "white",
+              background: "linear-gradient(90deg, #002F6C, #642F6C)",
+              transition: "all 0.3s ease",
+              "&:hover": {
+                background: "linear-gradient(90deg, #E41C77, #00ADEF)",
+                transform: "scale(1.05)",
+              },
+            }}
           >
-            Sign Up
+            SIGN UP
           </Button>
         </form>
       </Paper>

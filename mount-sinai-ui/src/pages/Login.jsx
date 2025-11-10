@@ -11,6 +11,7 @@ import {
   Alert,
   Link,
 } from "@mui/material";
+import MSLogo from "../assets/MSLogo.png"; // ✅ Mount Sinai logo
 
 function Login({ setAuth }) {
   const { register, handleSubmit } = useForm();
@@ -18,57 +19,97 @@ function Login({ setAuth }) {
   const [error, setError] = useState("");
 
   const onSubmit = async ({ email, password }) => {
-    //resets any previous error messages
     setError("");
 
-    //signs in user using their email and password if account exists
-    const { data, error } = await supabase.auth.signInWithPassword({
+    // Sign in with Supabase Auth
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
 
-    //show error if they dont authnicate account of wrong password
+    if (signInError) {
+      setError("Invalid email or password. Please try again.");
+      return;
+    }
 
-  const user = data.user;
+    const user = data.user;
 
-  const { data: userData, error: userError } = await supabase
-    .from("users")
-    .select("role")
-    .eq("user_id", user.id) // user.id matches the auth user’s ID
-    .single();
+    // Fetch role and name from your users table
+    const { data: userData, error: userError } = await supabase
+      .from("users")
+      .select("role, first_name, last_name")
+      .eq("user_id", user.id)
+      .single();
 
-  if (userError || !userData) {
-    setError("Unable to find user role. Please contact support.");
-    return;
-  }
+    if (userError || !userData) {
+      setError("Unable to find user information. Please contact support.");
+      return;
+    }
 
-  const role = userData.role;
+    // Store everything in app state
+    setAuth({
+      isLoggedIn: true,
+      role: userData.role,
+      firstName: userData.first_name,
+      lastName: userData.last_name,
+    });
 
-  setAuth({ isLoggedIn: true, role });
+    // ✅ Save to sessionStorage for refresh persistence
+    sessionStorage.setItem(
+      "auth",
+      JSON.stringify({
+        isLoggedIn: true,
+        role: userData.role,
+        firstName: userData.first_name,
+        lastName: userData.last_name,
+      })
+    );
 
-  if (role === "admin") {
-    navigate("/admin");
-  } else if (role === "agent") {
-    navigate("/chat");
-  } else {
-    setError("Unknown role. Please contact support.");
-  }
-
+    // Route based on role
+    if (userData.role === "admin") {
+      navigate("/admin");
+    } else if (userData.role === "agent") {
+      navigate("/chat");
+    } else {
+      setError("Unknown role. Please contact support.");
+    }
   };
 
   return (
     <Box
-      display="flex"
-      justifyContent="center"
-      alignItems="center"
-      height="100vh"
-      bgcolor="background.default"
+      sx={{
+        height: "100vh",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        background: "linear-gradient(135deg, #E6F0FA 0%, #FFFFFF 100%)",
+      }}
     >
-      <Paper elevation={3} sx={{ p: 4, width: 400 }}>
-        <Typography variant="h5" color="primary" gutterBottom>
+      <Paper
+        elevation={5}
+        sx={{
+          p: 4,
+          width: 400,
+          textAlign: "center",
+          borderRadius: 4,
+        }}
+      >
+        {/* Mount Sinai Logo */}
+        <img
+          src={MSLogo}
+          alt="Mount Sinai Logo"
+          style={{ width: "130px", marginBottom: "20px" }}
+        />
+
+        <Typography
+          variant="h6"
+          sx={{ fontWeight: "bold", color: "#002F6C", mb: 2 }}
+        >
           Mount Sinai Radiology Login
         </Typography>
-        {error && <Alert severity="error">{error}</Alert>}
+
+        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+
         <form onSubmit={handleSubmit(onSubmit)}>
           <TextField
             {...register("email")}
@@ -86,26 +127,45 @@ function Login({ setAuth }) {
             margin="normal"
             required
           />
+
           <Button
             type="submit"
-            variant="contained"
-            color="primary"
             fullWidth
-            sx={{ mt: 2 }}
+            sx={{
+              mt: 3,
+              py: 1,
+              fontWeight: "bold",
+              color: "white",
+              background: "linear-gradient(90deg, #002F6C, #642F6C)",
+              transition: "all 0.3s ease",
+              "&:hover": {
+                background: "linear-gradient(90deg, #E41C77, #00ADEF)",
+                transform: "scale(1.05)",
+              },
+            }}
           >
-            Login
+            LOGIN
           </Button>
         </form>
+
         <Typography variant="body2" sx={{ mt: 2 }}>
           Don’t have an account?{" "}
-          <Link href="/signup" underline="hover" color="secondary">
+          <Link
+            href="/signup"
+            underline="hover"
+            sx={{ color: "#E41C77", fontWeight: 500 }}
+          >
             Sign up here
           </Link>
         </Typography>
 
-        <Typography variant="body2" sx={{ mt: 2 }}>
+        <Typography variant="body2" sx={{ mt: 1 }}>
           Forgot Password?{" "}
-          <Link href="/resetpassword" underline="hover" color="secondary">
+          <Link
+            href="/resetpassword"
+            underline="hover"
+            sx={{ color: "#E41C77", fontWeight: 500 }}
+          >
             Reset Password
           </Link>
         </Typography>

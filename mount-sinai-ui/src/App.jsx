@@ -1,6 +1,7 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
+import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import AdminDashboard from "./pages/AdminDashboard";
@@ -10,13 +11,41 @@ import ResetPassword from "./pages/ResetPassword";
 import UpdatePassword from "./pages/UpdatePassword";
 
 function App() {
-  const [auth, setAuth] = useState({ isLoggedIn: false, role: null });
+  const [auth, setAuth] = useState({ isLoggedIn: false, role: null, firstName: "", lastName: "" });
+  const [loading, setLoading] = useState(true);
+
+  // ✅ Restore session on refresh
+  useEffect(() => {
+    const storedAuth = sessionStorage.getItem("auth");
+    if (storedAuth) {
+      setAuth(JSON.parse(storedAuth));
+    }
+    setLoading(false); // Done checking storage
+  }, []);
+
+  // 🚦 Don’t render routes until session check is done
+  if (loading) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          height: "100vh",
+          color: "#002F6C",
+          fontWeight: "bold",
+        }}
+      >
+        Loading...
+      </div>
+    );
+  }
 
   return (
     <Router>
       <Routes>
-        {/* Default: redirect to login */}
-        <Route path="/" element={<Navigate to="/login" />} />
+        {/* Default */}
+        <Route path="/" element={<Landing />} />
 
         {/* Auth Pages */}
         <Route path="/login" element={<Login setAuth={setAuth} />} />
@@ -29,7 +58,7 @@ function App() {
           path="/chat"
           element={
             auth.isLoggedIn && auth.role === "agent" ? (
-              <AgentChat />
+              <AgentChat auth={auth} />
             ) : (
               <Navigate to="/login" />
             )
@@ -41,14 +70,14 @@ function App() {
           path="/admin"
           element={
             auth.isLoggedIn && auth.role === "admin" ? (
-              <AdminDashboard />
+              <AdminDashboard auth={auth} />
             ) : (
               <Navigate to="/login" />
             )
           }
         />
 
-        {/* Catch-all for unknown routes */}
+        {/* Catch-all */}
         <Route path="*" element={<NotFound />} />
       </Routes>
     </Router>

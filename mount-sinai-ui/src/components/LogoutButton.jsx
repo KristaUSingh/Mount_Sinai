@@ -4,15 +4,10 @@ function LogoutButton({ setAuth }) {
   const navigate = useNavigate();
 
   const handleLogout = () => {
-    // Clear stored user info
-    localStorage.removeItem("user");
-
-    // Reset auth state
-    setAuth({ isLoggedIn: false, role: null });
-
-    // Redirect to login page
+    sessionStorage.removeItem("auth");
+    setAuth({ isLoggedIn: false, role: null, firstName: "", lastName: "" });
     navigate("/login");
-  };
+  };  
 
   return <button onClick={handleLogout}>Logout</button>;
 }
