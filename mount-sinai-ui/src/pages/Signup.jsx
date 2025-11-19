@@ -29,7 +29,7 @@ function Signup() {
       newErrors.push("At least one special character (!@#$%^&*)");
     return newErrors;
   };
-
+  
   const onSubmit = async ({ firstName, lastName, email, password, role }) => {
     setError("");
     setSuccess("");
@@ -60,6 +60,12 @@ function Signup() {
             login_time: new Date(),
           },
         ]);
+        
+        //compares with the postgre code 23505 if the account already exists
+        if (dbError?.code === "23505") {
+          setError("Account already exists. Login or reset password.");
+          return;
+        }
         if (dbError) throw dbError;
       }
 
@@ -70,7 +76,7 @@ function Signup() {
       setError(err.message || "Something went wrong during signup.");
     }
   };
-
+  
   return (
     <Box
       sx={{

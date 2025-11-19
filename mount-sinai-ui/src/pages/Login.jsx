@@ -17,6 +17,7 @@ function Login({ setAuth }) {
   const { register, handleSubmit } = useForm();
   const navigate = useNavigate();
   const [error, setError] = useState("");
+  const [emailSent, setEmailSent] = useState(false);
 
   const onSubmit = async ({ email, password }) => {
     setError("");
@@ -27,10 +28,43 @@ function Login({ setAuth }) {
       password,
     });
 
-    if (signInError) {
-      setError("Invalid email or password. Please try again.");
+  if (signInError) {
+
+    // Detect unverified email
+    if (signInError.code === "email_not_confirmed") {
+      // Always show this
+      setError("Your email isn’t verified. Please check your inbox.");
+
+      // Send verification email only once per session
+      if (!emailSent) {
+        try {
+          const { error: resendError } = await supabase.auth.resend({
+            type: "signup",
+            email,
+          });
+
+          if (!resendError) {
+            setEmailSent(true);
+          } else {
+            console.error("Resend error:", resendError.message);
+          }
+        } catch (err) {
+          console.error(err);
+        }
+      }
       return;
     }
+
+    // Wrong email or password
+    if (signInError.code === "invalid_credentials") {
+      setError("Incorrect email or password.");
+      return;
+    }
+
+    // Fallback for unexpected errors
+    setError("Something went wrong. Please try again.");
+    return;
+  }
 
     const user = data.user;
 
