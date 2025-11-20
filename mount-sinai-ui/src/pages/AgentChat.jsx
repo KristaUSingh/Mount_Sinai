@@ -10,89 +10,129 @@ import {
   List,
   ListItem,
   ListItemText,
+  ToggleButton,
+  ToggleButtonGroup,
 } from "@mui/material";
 import { useNavigate } from "react-router-dom";
 import MSLogo from "../assets/MSLogo.png";
 
 function AgentChat({ auth }) {
-  const [messages, setMessages] = useState([
+  // TWO SEPARATE MESSAGE STATES
+  const [scheduleMessages, setScheduleMessages] = useState([
     {
       sender: "bot",
       text: "Welcome to the Mount Sinai Radiology Assistant. How can I help you today?",
     },
   ]);
+
+  const [ragMessages, setRagMessages] = useState([
+    {
+      sender: "bot",
+      text: "Document Q&A Mode enabled. Ask about uploaded files.",
+    },
+  ]);
+
   const [input, setInput] = useState("");
   const [greeting, setGreeting] = useState("");
-  const navigate = useNavigate();
 
-  // 🆕 Auto-scroll reference
+  // WHICH MODE?
+  const [mode, setMode] = useState("schedule");
+
+  const navigate = useNavigate();
   const messagesEndRef = useRef(null);
 
-  // 🕒 Dynamic greeting based on time
+  // Greeting logic
   useEffect(() => {
     const hour = new Date().getHours();
-    if (hour < 12) setGreeting("Good morning");
-    else if (hour < 18) setGreeting("Good afternoon");
-    else setGreeting("Good evening");
+    setGreeting(
+      hour < 12
+        ? "Good morning"
+        : hour < 18
+        ? "Good afternoon"
+        : "Good evening"
+    );
   }, []);
 
-  // 🆕 Scroll to bottom when messages change
+  // Auto-scroll to bottom
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [scheduleMessages, ragMessages, mode]);
 
-  // 🛰️ Connect to backend
+  // BACKEND CALL
   const sendToBackend = async (question) => {
     try {
-      const res = await fetch("http://localhost:8000/agent-chat", {
+      const endpoint =
+        mode === "schedule"
+          ? "http://localhost:8000/agent-chat"
+          : "http://localhost:8000/rag-chat";
+
+      const body =
+        mode === "schedule"
+          ? JSON.stringify({ question })
+          : new URLSearchParams({ query: question });
+
+      const headers =
+        mode === "schedule"
+          ? { "Content-Type": "application/json" }
+          : { "Content-Type": "application/x-www-form-urlencoded" };
+
+      const res = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question }),
+        headers,
+        body,
       });
 
       const data = await res.json();
-      return data.answer;
-    } catch (error) {
-      return "Error: Could not connect to backend.";
+      return data.answer || "No response available.";
+    } catch (err) {
+      return "Error: Cannot reach backend.";
     }
   };
 
-  // 💬 Send message logic
+  // SEND MESSAGE HANDLER
   const handleSend = async () => {
     if (!input.trim()) return;
 
-    // Add user's message
-    const newMessages = [...messages, { sender: "agent", text: input }];
-    setMessages(newMessages);
+    const userMessage = { sender: "agent", text: input };
+    const thinkingMessage = { sender: "bot", text: "Thinking..." };
 
-    // Clear the input immediately
+    let updateMessages, setMessages;
+
+    if (mode === "schedule") {
+      updateMessages = [...scheduleMessages, userMessage];
+      setMessages = setScheduleMessages;
+      setScheduleMessages(updateMessages);
+      setScheduleMessages((prev) => [...prev, thinkingMessage]);
+    } else {
+      updateMessages = [...ragMessages, userMessage];
+      setMessages = setRagMessages;
+      setRagMessages(updateMessages);
+      setRagMessages((prev) => [...prev, thinkingMessage]);
+    }
+
+    // CLEAR INPUT
     setInput("");
 
-    // Add temporary "Thinking..." message
-    setMessages((prev) => [...prev, { sender: "bot", text: "Thinking..." }]);
+    // BACKEND REPLY
+    const reply = await sendToBackend(input);
+    const botReply = { sender: "bot", text: reply };
 
-    // Get backend reply
-    const backendReply = await sendToBackend(input);
-
-    // Replace "Thinking..." with real response
-    setMessages((prev) => [
-      ...newMessages,
-      { sender: "bot", text: backendReply },
-    ]);
+    // REPLACE "Thinking..." with real answer
+    setMessages((prev) => [...updateMessages, botReply]);
   };
 
-  // 🚪 Logout
-  const handleLogout = () => {
-    navigate("/login");
-  };
+  const handleLogout = () => navigate("/login");
+
+  // SELECT WHICH MESSAGE STATE TO DISPLAY
+  const displayedMessages = mode === "schedule" ? scheduleMessages : ragMessages;
 
   return (
     <Box sx={{ bgcolor: "#F7F9FC", minHeight: "100vh" }}>
-      {/* 🩺 Navbar */}
+      {/* Navbar */}
       <AppBar position="static" sx={{ bgcolor: "#002F6C" }}>
         <Toolbar sx={{ display: "flex", justifyContent: "space-between" }}>
           <Box display="flex" alignItems="center" gap={1.5}>
@@ -124,7 +164,7 @@ function AgentChat({ auth }) {
         </Toolbar>
       </AppBar>
 
-      {/* 👋 Greeting Banner */}
+      {/* Greeting */}
       <Box
         sx={{
           background: "linear-gradient(135deg, #E6F0FA 0%, #FFFFFF 100%)",
@@ -143,7 +183,7 @@ function AgentChat({ auth }) {
         </Typography>
       </Box>
 
-      {/* 💬 Chat Interface */}
+      {/* Chat Interface */}
       <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", px: 4, pb: 6 }}>
         <Paper
           elevation={6}
@@ -157,32 +197,40 @@ function AgentChat({ auth }) {
             backgroundColor: "#FFFFFF",
           }}
         >
-          <Typography
-            variant="h6"
-            sx={{
-              color: "#002F6C",
-              mb: 2,
-              fontWeight: 600,
-              textAlign: "center",
-              fontFamily: "Poppins, sans-serif",
-            }}
-          >
-            Radiology Assistant Chat
-          </Typography>
+          {/* Title + Toggle */}
+          <Box sx={{ textAlign: "center", mb: 2 }}>
+            <Typography variant="h6" sx={{ color: "#002F6C", fontWeight: 600 }}>
+              Radiology Assistant Chat
+            </Typography>
 
-          {/* 💭 Messages */}
+            {/* MODE TOGGLE BUTTONS */}
+            <ToggleButtonGroup
+              value={mode}
+              exclusive
+              onChange={(e, val) => val && setMode(val)}
+              sx={{ mt: 2 }}
+            >
+              <ToggleButton value="schedule">Scheduling Mode</ToggleButton>
+              <ToggleButton value="rag">Document Q&A Mode</ToggleButton>
+            </ToggleButtonGroup>
+          </Box>
+
+          {/* Messages */}
           <List sx={{ flexGrow: 1, overflowY: "auto", pb: 1 }}>
-            {messages.map((msg, idx) => (
+            {displayedMessages.map((msg, idx) => (
               <ListItem
                 key={idx}
-                sx={{
-                  justifyContent: msg.sender === "agent" ? "flex-end" : "flex-start",
-                }}
+                sx={{ justifyContent: msg.sender === "agent" ? "flex-end" : "flex-start" }}
               >
                 <ListItemText
                   primary={msg.text}
                   sx={{
-                    bgcolor: msg.sender === "agent" ? "#002F6C" : "#E8F0FE",
+                    bgcolor:
+                      msg.sender === "agent"
+                        ? "#002F6C"
+                        : mode === "rag"
+                        ? "#FFF8E1"
+                        : "#E8F0FE",
                     color: msg.sender === "agent" ? "white" : "#002F6C",
                     px: 2,
                     py: 1,
@@ -193,24 +241,22 @@ function AgentChat({ auth }) {
                 />
               </ListItem>
             ))}
-
-            {/* 🆕 Scroll anchor */}
             <div ref={messagesEndRef} />
           </List>
 
-          {/* ✍️ Input Bar */}
+          {/* Input */}
           <Box sx={{ display: "flex", gap: 2, mt: 2 }}>
             <TextField
               fullWidth
-              placeholder="Ask a question..."
+              placeholder={
+                mode === "schedule"
+                  ? "Ask about exam locations, rooms, durations..."
+                  : "Ask about uploaded documents..."
+              }
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSend()}
-              sx={{
-                "& .MuiOutlinedInput-root": {
-                  borderRadius: 2,
-                },
-              }}
+              sx={{ "& .MuiOutlinedInput-root": { borderRadius: 2 } }}
             />
             <Button
               variant="contained"

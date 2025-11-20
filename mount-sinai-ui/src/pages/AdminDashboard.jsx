@@ -24,6 +24,8 @@ import {
   FormControl,
   InputLabel,
   Select,
+  Snackbar,
+  Alert,
 } from "@mui/material";
 import DeleteIcon from "@mui/icons-material/Delete";
 import VisibilityIcon from "@mui/icons-material/Visibility";
@@ -39,23 +41,87 @@ function AdminDashboard({ auth }) {
   const [files, setFiles] = useState([]);
   const [noteTitle, setNoteTitle] = useState("");
   const [noteContent, setNoteContent] = useState("");
-  const [fileType, setFileType] = useState(""); // ✅ New dropdown state
+  const [fileType, setFileType] = useState(""); 
   const [openConfirm, setOpenConfirm] = useState(false);
   const [fileToDelete, setFileToDelete] = useState(null);
+
+  // Notifications
+  const [alert, setAlert] = useState({ open: false, msg: "", type: "success" });
+
   const navigate = useNavigate();
 
-  // ✅ Handle file upload + attach chosen type
+  // =========================================================
+  // 🟦 BACKEND: Upload file → /upload
+  // =========================================================
+  const handleUploadBackend = async (file) => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await fetch("http://localhost:8000/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await res.json();
+
+      if (data.message) {
+        setAlert({ open: true, msg: data.message, type: "success" });
+      } else {
+        setAlert({
+          open: true,
+          msg: "Upload failed. Check backend.",
+          type: "error",
+        });
+      }
+    } catch (error) {
+      setAlert({
+        open: true,
+        msg: "Error uploading to server.",
+        type: "error",
+      });
+    }
+  };
+
+  // =========================================================
+  // 🟪 BACKEND: Reset FAISS → /init_index
+  // =========================================================
+  const handleResetIndex = async () => {
+    try {
+      const res = await fetch("http://localhost:8000/init_index", {
+        method: "POST",
+      });
+      const data = await res.json();
+
+      setAlert({ open: true, msg: data.message, type: "success" });
+    } catch (error) {
+      setAlert({
+        open: true,
+        msg: "Failed to reset index.",
+        type: "error",
+      });
+    }
+  };
+
+  // =========================================================
+  // 📁 FRONTEND + BACKEND Upload Integration
+  // =========================================================
   const handleFileUpload = (event) => {
-    const uploaded = Array.from(event.target.files).map((f) => ({
+    const uploaded = Array.from(event.target.files);
+
+    uploaded.forEach((file) => handleUploadBackend(file));
+
+    const mapped = uploaded.map((f) => ({
       name: f.name,
       category: fileType || "Other",
       type: "protocol",
       url: URL.createObjectURL(f),
     }));
-    setFiles((prev) => [...prev, ...uploaded]);
+
+    setFiles((prev) => [...prev, ...mapped]);
   };
 
-  // ✅ Handle adding notes as JSON
+  // Notes (unchanged)
   const handleAddPolicy = () => {
     if (!noteTitle.trim() || !noteContent.trim()) return;
 
@@ -81,8 +147,8 @@ function AdminDashboard({ auth }) {
     setNoteContent("");
   };
 
-  // ✅ File preview + delete logic
   const handleView = (url) => window.open(url, "_blank");
+
   const confirmDelete = () => {
     setFiles((prev) => prev.filter((file) => file.name !== fileToDelete));
     setFileToDelete(null);
@@ -151,14 +217,14 @@ function AdminDashboard({ auth }) {
       {/* Main content */}
       <Box sx={{ px: 4, pb: 6 }}>
         <Grid container spacing={4} justifyContent="center">
-          {/* ✅ Upload Files */}
+
+          {/* Upload Files */}
           <Grid item xs={12} md={4}>
             <Paper sx={{ p: 3, borderRadius: 3, textAlign: "center" }} elevation={4}>
               <Typography variant="h6" sx={{ color: "#002F6C", fontWeight: 600 }}>
                 Upload Protocol Files
               </Typography>
 
-              {/* Dropdown for Type */}
               <FormControl fullWidth sx={{ mt: 2 }}>
                 <InputLabel>Type</InputLabel>
                 <Select
@@ -193,18 +259,23 @@ function AdminDashboard({ auth }) {
                 Upload Files
                 <input hidden type="file" multiple onChange={handleFileUpload} />
               </Button>
-              {!fileType && (
-                <Typography
-                  variant="caption"
-                  sx={{ mt: 1, display: "block", color: "gray" }}
-                >
-                  Please select a type before uploading
-                </Typography>
-              )}
+
+              <Button
+                fullWidth
+                sx={{
+                  mt: 2,
+                  fontWeight: "bold",
+                  color: "white",
+                  background: "linear-gradient(90deg, #E41C77, #00ADEF)",
+                }}
+                onClick={handleResetIndex}
+              >
+                Reset Knowledge Base
+              </Button>
             </Paper>
           </Grid>
 
-          {/* Add Notes */}
+          {/* Notes Section (unchanged) */}
           <Grid item xs={12} md={4}>
             <Paper sx={{ p: 3, borderRadius: 3, textAlign: "center" }} elevation={4}>
               <Typography variant="h6" sx={{ color: "#002F6C", fontWeight: 600 }}>
@@ -282,12 +353,9 @@ function AdminDashboard({ auth }) {
                                 fontWeight: 600,
                                 color: "white",
                                 background:
-                                  file.type === "note"
-                                    ? "#E41C77"
-                                    : "#002F6C",
+                                  file.type === "note" ? "#E41C77" : "#002F6C",
                               }}
                             />
-                            {/* Show uploaded type */}
                             {file.category && (
                               <Chip
                                 label={file.category}
@@ -322,11 +390,7 @@ function AdminDashboard({ auth }) {
                       ))
                     ) : (
                       <TableRow>
-                        <TableCell
-                          colSpan={2}
-                          align="center"
-                          sx={{ color: "#777" }}
-                        >
+                        <TableCell colSpan={2} align="center" sx={{ color: "#777" }}>
                           No files uploaded yet
                         </TableCell>
                       </TableRow>
@@ -382,6 +446,17 @@ function AdminDashboard({ auth }) {
             </Button>
           </DialogActions>
         </Dialog>
+
+        {/* Snackbar Alerts */}
+        <Snackbar
+          open={alert.open}
+          autoHideDuration={4000}
+          onClose={() => setAlert({ ...alert, open: false })}
+        >
+          <Alert severity={alert.type} sx={{ width: "100%" }}>
+            {alert.msg}
+          </Alert>
+        </Snackbar>
       </Box>
     </Box>
   );
