@@ -27,6 +27,7 @@ import {
   Snackbar,
   Alert,
 } from "@mui/material";
+
 import DeleteIcon from "@mui/icons-material/Delete";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import { useState, forwardRef } from "react";
@@ -41,17 +42,20 @@ function AdminDashboard({ auth }) {
   const [files, setFiles] = useState([]);
   const [noteTitle, setNoteTitle] = useState("");
   const [noteContent, setNoteContent] = useState("");
-  const [fileType, setFileType] = useState(""); 
+
+  const [fileType, setFileType] = useState("");
+  const [fileExtension, setFileExtension] = useState("");
+  const [selectedFile, setSelectedFile] = useState(null);
+
   const [openConfirm, setOpenConfirm] = useState(false);
   const [fileToDelete, setFileToDelete] = useState(null);
 
-  // Notifications
   const [alert, setAlert] = useState({ open: false, msg: "", type: "success" });
 
   const navigate = useNavigate();
 
   // =========================================================
-  // 🟦 BACKEND: Upload file → /upload
+  // BACKEND UPLOAD FILE
   // =========================================================
   const handleUploadBackend = async (file) => {
     const formData = new FormData();
@@ -65,36 +69,32 @@ function AdminDashboard({ auth }) {
 
       const data = await res.json();
 
-      if (data.message) {
-        setAlert({ open: true, msg: data.message, type: "success" });
-      } else {
-        setAlert({
-          open: true,
-          msg: "Upload failed. Check backend.",
-          type: "error",
-        });
-      }
-    } catch (error) {
       setAlert({
         open: true,
-        msg: "Error uploading to server.",
+        msg: data.message || "Upload failed.",
+        type: data.message ? "success" : "error",
+      });
+    } catch {
+      setAlert({
+        open: true,
+        msg: "Error uploading to backend.",
         type: "error",
       });
     }
   };
 
   // =========================================================
-  // 🟪 BACKEND: Reset FAISS → /init_index
+  // RESET FAISS INDEX
   // =========================================================
   const handleResetIndex = async () => {
     try {
       const res = await fetch("http://localhost:8000/init_index", {
         method: "POST",
       });
-      const data = await res.json();
 
+      const data = await res.json();
       setAlert({ open: true, msg: data.message, type: "success" });
-    } catch (error) {
+    } catch {
       setAlert({
         open: true,
         msg: "Failed to reset index.",
@@ -104,24 +104,8 @@ function AdminDashboard({ auth }) {
   };
 
   // =========================================================
-  // 📁 FRONTEND + BACKEND Upload Integration
+  // ADD TEXT-BASED POLICY NOTE
   // =========================================================
-  const handleFileUpload = (event) => {
-    const uploaded = Array.from(event.target.files);
-
-    uploaded.forEach((file) => handleUploadBackend(file));
-
-    const mapped = uploaded.map((f) => ({
-      name: f.name,
-      category: fileType || "Other",
-      type: "protocol",
-      url: URL.createObjectURL(f),
-    }));
-
-    setFiles((prev) => [...prev, ...mapped]);
-  };
-
-  // Notes (unchanged)
   const handleAddPolicy = () => {
     if (!noteTitle.trim() || !noteContent.trim()) return;
 
@@ -134,12 +118,11 @@ function AdminDashboard({ auth }) {
     const blob = new Blob([JSON.stringify(noteData, null, 2)], {
       type: "application/json",
     });
-    const url = URL.createObjectURL(blob);
 
     const newNote = {
       name: `${noteTitle}.json`,
       type: "note",
-      url,
+      url: URL.createObjectURL(blob),
     };
 
     setFiles((prev) => [...prev, newNote]);
@@ -147,14 +130,18 @@ function AdminDashboard({ auth }) {
     setNoteContent("");
   };
 
+  // =========================================================
+  // VIEW + DELETE
+  // =========================================================
   const handleView = (url) => window.open(url, "_blank");
 
   const confirmDelete = () => {
-    setFiles((prev) => prev.filter((file) => file.name !== fileToDelete));
+    setFiles((prev) => prev.filter((f) => f.name !== fileToDelete));
     setFileToDelete(null);
     setOpenConfirm(false);
   };
 
+  // Greeting
   const getGreeting = () => {
     const hour = new Date().getHours();
     if (hour < 12) return "Good morning";
@@ -164,7 +151,7 @@ function AdminDashboard({ auth }) {
 
   return (
     <Box sx={{ bgcolor: "#F7F9FC", minHeight: "100vh" }}>
-      {/* Navbar */}
+      {/* NAVBAR */}
       <AppBar position="static" sx={{ bgcolor: "#002F6C" }}>
         <Toolbar sx={{ display: "flex", justifyContent: "space-between" }}>
           <Box display="flex" alignItems="center" gap={1.5}>
@@ -173,10 +160,12 @@ function AdminDashboard({ auth }) {
               Mount Sinai Radiology Admin
             </Typography>
           </Box>
+
           <Box display="flex" alignItems="center" gap={2}>
             <Typography sx={{ color: "white", fontWeight: 500 }}>
               {auth?.firstName || "Admin"} {auth?.lastName || ""}
             </Typography>
+
             <Button
               variant="outlined"
               sx={{
@@ -195,7 +184,7 @@ function AdminDashboard({ auth }) {
         </Toolbar>
       </AppBar>
 
-      {/* Greeting */}
+      {/* GREETING */}
       <Box
         sx={{
           background: "linear-gradient(135deg, #E6F0FA 0%, #FFFFFF 100%)",
@@ -214,18 +203,29 @@ function AdminDashboard({ auth }) {
         </Typography>
       </Box>
 
-      {/* Main content */}
+      {/* MAIN CONTENT */}
       <Box sx={{ px: 4, pb: 6 }}>
         <Grid container spacing={4} justifyContent="center">
-
-          {/* Upload Files */}
+          {/* ====================== UPLOAD CARD ====================== */}
           <Grid item xs={12} md={4}>
-            <Paper sx={{ p: 3, borderRadius: 3, textAlign: "center" }} elevation={4}>
+            <Paper
+              sx={{
+                p: 3,
+                borderRadius: 3,
+                textAlign: "center",
+                height: 350,
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "space-between",
+              }}
+              elevation={4}
+            >
               <Typography variant="h6" sx={{ color: "#002F6C", fontWeight: 600 }}>
                 Upload Protocol Files
               </Typography>
 
-              <FormControl fullWidth sx={{ mt: 2 }}>
+              {/* TYPE DROPDOWN */}
+              <FormControl fullWidth>
                 <InputLabel>Type</InputLabel>
                 <Select
                   value={fileType}
@@ -239,48 +239,117 @@ function AdminDashboard({ auth }) {
                 </Select>
               </FormControl>
 
+              {/* EXTENSION DROPDOWN */}
+              <FormControl fullWidth>
+                <InputLabel>File Extension</InputLabel>
+                <Select
+                  value={fileExtension}
+                  label="File Extension"
+                  onChange={(e) => setFileExtension(e.target.value)}
+                >
+                  <MenuItem value="pdf">PDF</MenuItem>
+                  <MenuItem value="docx">Word (.docx)</MenuItem>
+                  <MenuItem value="csv">CSV</MenuItem>
+                  <MenuItem value="xlsx">Excel (.xlsx)</MenuItem>
+                  <MenuItem value="md">Markdown (.md)</MenuItem>
+                </Select>
+              </FormControl>
+
+              {/* SELECT FILE */}
               <Button
                 variant="contained"
                 component="label"
-                disabled={!fileType}
+                disabled={!fileType || !fileExtension}
                 sx={{
-                  mt: 3,
                   fontWeight: "bold",
-                  background: fileType
-                    ? "linear-gradient(90deg, #002F6C, #642F6C)"
-                    : "#ccc",
-                  "&:hover": {
-                    background: fileType
-                      ? "linear-gradient(90deg, #E41C77, #00ADEF)"
+                  background:
+                    fileType && fileExtension
+                      ? "linear-gradient(90deg, #002F6C, #642F6C)"
                       : "#ccc",
+                  "&:hover": {
+                    background:
+                      fileType && fileExtension
+                        ? "linear-gradient(90deg, #E41C77, #00ADEF)"
+                        : "#ccc",
                   },
                 }}
               >
-                Upload Files
-                <input hidden type="file" multiple onChange={handleFileUpload} />
+                Select File
+                <input
+                  hidden
+                  type="file"
+                  accept={`.${fileExtension}`}
+                  onChange={(e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+
+                    setSelectedFile(file);
+                    e.target.value = "";
+                  }}
+                />
               </Button>
 
-              <Button
-                fullWidth
-                sx={{
-                  mt: 2,
-                  fontWeight: "bold",
-                  color: "white",
-                  background: "linear-gradient(90deg, #E41C77, #00ADEF)",
-                }}
-                onClick={handleResetIndex}
-              >
-                Reset Knowledge Base
-              </Button>
+              {/* FILE PREVIEW + SUBMIT */}
+              {selectedFile && (
+                <Box sx={{ mt: 1 }}>
+                  <Typography sx={{ fontSize: 14 }}>
+                    <strong>Selected:</strong> {selectedFile.name}
+                  </Typography>
+
+                  <Button
+                    fullWidth
+                    sx={{
+                      mt: 1,
+                      fontWeight: "bold",
+                      color: "white",
+                      background: "linear-gradient(90deg, #E41C77, #00ADEF)",
+                      "&:hover": {
+                        background: "linear-gradient(90deg, #002F6C, #642F6C)",
+                      },
+                    }}
+                    onClick={() => {
+                      handleUploadBackend(selectedFile);
+
+                      setFiles((prev) => [
+                        ...prev,
+                        {
+                          name: selectedFile.name,
+                          category: fileType,
+                          type: "protocol",
+                          url: URL.createObjectURL(selectedFile),
+                        },
+                      ]);
+
+                      // RESET UI
+                      setSelectedFile(null);
+                      setFileType("");
+                      setFileExtension("");
+                    }}
+                  >
+                    Submit to Knowledge Base
+                  </Button>
+                </Box>
+              )}
             </Paper>
           </Grid>
 
-          {/* Notes Section (unchanged) */}
+          {/* ====================== NOTES CARD ====================== */}
           <Grid item xs={12} md={4}>
-            <Paper sx={{ p: 3, borderRadius: 3, textAlign: "center" }} elevation={4}>
+            <Paper
+              sx={{
+                p: 3,
+                borderRadius: 3,
+                textAlign: "center",
+                height: 350,
+                display: "flex",
+                flexDirection: "column",
+              }}
+              elevation={4}
+            >
               <Typography variant="h6" sx={{ color: "#002F6C", fontWeight: 600 }}>
                 Add / Edit Policy Notes
               </Typography>
+
               <TextField
                 label="Title"
                 fullWidth
@@ -291,15 +360,15 @@ function AdminDashboard({ auth }) {
               <TextField
                 fullWidth
                 multiline
-                rows={3}
+                rows={2}
                 placeholder="Enter note..."
                 value={noteContent}
                 onChange={(e) => setNoteContent(e.target.value)}
               />
+
               <Button
                 sx={{
                   mt: 2,
-                  py: 1,
                   fontWeight: "bold",
                   color: "white",
                   background: "linear-gradient(90deg, #E41C77, #00ADEF)",
@@ -307,7 +376,6 @@ function AdminDashboard({ auth }) {
                     background: "linear-gradient(90deg, #002F6C, #642F6C)",
                   },
                 }}
-                fullWidth
                 onClick={handleAddPolicy}
               >
                 Save Policy
@@ -315,16 +383,26 @@ function AdminDashboard({ auth }) {
             </Paper>
           </Grid>
 
-          {/* Uploaded Policies */}
+          {/* ====================== UPLOADED POLICIES ====================== */}
           <Grid item xs={12} md={4}>
-            <Paper sx={{ p: 3, borderRadius: 3 }} elevation={4}>
+            <Paper
+              sx={{
+                p: 3,
+                borderRadius: 3,
+                height: 350,
+                display: "flex",
+                flexDirection: "column",
+              }}
+              elevation={4}
+            >
               <Typography
                 variant="h6"
                 sx={{ color: "#002F6C", fontWeight: 600, textAlign: "center" }}
               >
                 Uploaded Policies
               </Typography>
-              <TableContainer>
+
+              <TableContainer sx={{ flexGrow: 1, overflowY: "auto", mt: 1 }}>
                 <Table size="small">
                   <TableHead>
                     <TableRow>
@@ -332,30 +410,35 @@ function AdminDashboard({ auth }) {
                         Policy / File
                       </TableCell>
                       <TableCell
-                        align="right"
                         sx={{ fontWeight: 600, color: "#002F6C" }}
+                        align="right"
                       >
                         Actions
                       </TableCell>
                     </TableRow>
                   </TableHead>
+
                   <TableBody>
-                    {files.length > 0 ? (
+                    {files.length ? (
                       files.map((file, idx) => (
                         <TableRow key={idx}>
                           <TableCell>
                             {file.name}
+
                             <Chip
                               label={file.type === "note" ? "Note" : "Protocol"}
                               size="small"
                               sx={{
                                 ml: 1,
-                                fontWeight: 600,
                                 color: "white",
+                                fontWeight: 600,
                                 background:
-                                  file.type === "note" ? "#E41C77" : "#002F6C",
+                                  file.type === "note"
+                                    ? "#E41C77"
+                                    : "#002F6C",
                               }}
                             />
+
                             {file.category && (
                               <Chip
                                 label={file.category}
@@ -369,6 +452,7 @@ function AdminDashboard({ auth }) {
                               />
                             )}
                           </TableCell>
+
                           <TableCell align="right">
                             <IconButton
                               color="primary"
@@ -376,6 +460,7 @@ function AdminDashboard({ auth }) {
                             >
                               <VisibilityIcon />
                             </IconButton>
+
                             <IconButton
                               color="error"
                               onClick={() => {
@@ -398,41 +483,50 @@ function AdminDashboard({ auth }) {
                   </TableBody>
                 </Table>
               </TableContainer>
+
+              {/* RESET INDEX BUTTON */}
+              <Button
+                fullWidth
+                sx={{
+                  mt: 2,
+                  fontWeight: "bold",
+                  color: "white",
+                  background: "linear-gradient(90deg, #E41C77, #00ADEF)",
+                }}
+                onClick={handleResetIndex}
+              >
+                Reset Knowledge Base
+              </Button>
             </Paper>
           </Grid>
         </Grid>
 
-        {/* Delete Confirmation Dialog */}
+        {/* CONFIRM DELETE */}
         <Dialog
           open={openConfirm}
           TransitionComponent={Transition}
           keepMounted
           onClose={() => setOpenConfirm(false)}
-          aria-labelledby="delete-confirmation"
-          PaperProps={{
-            sx: { borderRadius: 3, p: 1, boxShadow: 6 },
-          }}
-          BackdropProps={{
-            sx: { backdropFilter: "blur(3px)" },
-          }}
+          PaperProps={{ sx: { borderRadius: 3, p: 1, boxShadow: 6 } }}
         >
-          <DialogTitle id="delete-confirmation" sx={{ fontWeight: "bold" }}>
+          <DialogTitle sx={{ fontWeight: "bold" }}>
             Confirm Deletion
           </DialogTitle>
           <DialogContent>
             <Typography>
-              Are you sure you want to delete <strong>{fileToDelete}</strong>?
+              Are you sure you want to delete{" "}
+              <strong>{fileToDelete}</strong>?
             </Typography>
           </DialogContent>
+
           <DialogActions>
             <Button
-              onClick={() => setOpenConfirm(false)}
               sx={{ color: "#002F6C", fontWeight: 600 }}
+              onClick={() => setOpenConfirm(false)}
             >
               Cancel
             </Button>
             <Button
-              onClick={confirmDelete}
               sx={{
                 background: "linear-gradient(90deg, #E41C77, #00ADEF)",
                 color: "white",
@@ -441,13 +535,14 @@ function AdminDashboard({ auth }) {
                   background: "linear-gradient(90deg, #002F6C, #642F6C)",
                 },
               }}
+              onClick={confirmDelete}
             >
               Delete
             </Button>
           </DialogActions>
         </Dialog>
 
-        {/* Snackbar Alerts */}
+        {/* ALERTS */}
         <Snackbar
           open={alert.open}
           autoHideDuration={4000}
