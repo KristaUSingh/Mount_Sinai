@@ -30,12 +30,6 @@ def map_room_to_dep(row):
 
 df["DEP Name"] = df.apply(map_room_to_dep, axis=1)
 
-# Filter for Manhattan sites 
-manhattan_sites = [
-"10 UNION SQ E RAD CT",
-"1176 5TH AVE RAD CT",
-"1470 MADISON AVE RAD CT"
-]
 
 # Only include manhattan sites in the dataframe 
 # df = df[df["DEP Name"].isin(manhattan_sites)]
