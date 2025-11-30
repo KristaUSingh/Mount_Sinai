@@ -190,3 +190,33 @@ def rooms_for_exam_at_site(exam_query: str, site_query: str):
     ]
 
     return sorted(rooms_at_site)
+
+# -------------------------------------------------------------
+# Helper for intent 6: rooms_for_exam
+# -------------------------------------------------------------
+def rooms_for_exam(exam_query: str):
+    """
+    Purpose:
+        Return ALL rooms (across all sites) that perform a given exam.
+
+    Example:
+        Input:
+            "ct head wo"
+        Output:
+            ["HESS CT ROOM 6", "RA CT ROOM 5", "MSH CT 1", ...]
+
+    How:
+        - Fuzzy match the exam name
+        - Filter the dataframe to those exam(s)
+        - Collect and return the unique room names
+    """
+    exams = best_exam_match(exam_query)
+    if not exams:
+        return []
+
+    subset = df[df["EAP Name"].isin(exams)]
+
+    # Drop duplicates, ignore missing values
+    rooms = subset["Room Name"].dropna().unique().tolist()
+
+    return sorted(rooms)

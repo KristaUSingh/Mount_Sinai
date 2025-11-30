@@ -12,7 +12,8 @@ from src.query_handlers import (
     locations_for_exam,
     exams_at_site,
     exam_duration,
-    rooms_for_exam_at_site
+    rooms_for_exam_at_site,
+    rooms_for_exam
 )
 
 def answer_scheduling_query(user_input: str):
@@ -42,7 +43,7 @@ def answer_scheduling_query(user_input: str):
     elif intent == "locations_for_exam" and exam:
         locs = locations_for_exam(exam)
         return (
-            f"{exam} is performed at: {', '.join(locs)}."
+            f"{exam} is performed at:\n" + "\n".join(locs)
             if locs else f"Sorry, I couldn’t find any locations for {exam}."
         )
 
@@ -50,7 +51,7 @@ def answer_scheduling_query(user_input: str):
     elif intent == "exams_at_site" and site:
         exams = exams_at_site(site)
         return (
-            f"Exams offered at {site}: {', '.join(exams)}."
+            f"Exams offered at {site}\n:" + "\n".join(exams)
             if exams else f"No exams found for {site}."
         )
     
@@ -66,8 +67,16 @@ def answer_scheduling_query(user_input: str):
     elif intent == "rooms_for_exam_at_site" and exam and site:
         rooms = rooms_for_exam_at_site(exam, site)
         return (
-            f"Rooms at {site} performing {exam}: {', '.join(rooms)}."
+            f"Rooms at {site} performing {exam}:\n" + "\n".join(rooms)
             if rooms else f"No matching rooms found for {exam} at {site}."
+        )
+    
+    # Intent 6: "Which rooms perform [exam]?"
+    elif intent == "rooms_for_exam" and exam:
+        rooms = rooms_for_exam(exam)
+        return (
+            f"Rooms performing {exam}:\n" + "\n".join(rooms)
+            if rooms else f"No matching rooms found for {exam}."
         )
 
     # Fallback if Gemini can't classify the question

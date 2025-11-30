@@ -48,6 +48,7 @@ def interpret_scheduling_query(user_question: str):
       4. "exam_duration"      → user asks how long an exam or visit takes 
                                 (based on 'Visit Type Length' in minutes)
       5. "rooms_for_exam_at_site" → user asks which rooms at a specific site perform a specific exam
+      6. "rooms_for_exam" → when the user asks which rooms perform an exam, without specifying a site.
 
     Respond *only* as compact JSON:
     {{
