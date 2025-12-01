@@ -303,7 +303,6 @@ function AdminDashboard({ auth }) {
                       <MenuItem value="pdf">PDF</MenuItem>
                       <MenuItem value="docx">Word (.docx)</MenuItem>
                       <MenuItem value="csv">CSV</MenuItem>
-                      <MenuItem value="xlsx">Excel (.xlsx)</MenuItem>
                       <MenuItem value="md">Markdown (.md)</MenuItem>
                     </Select>
                   </FormControl>
