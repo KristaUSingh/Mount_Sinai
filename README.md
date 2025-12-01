@@ -86,7 +86,7 @@ Both UIs are built with **React + Vite**, styled using **Material UI (MUI)**, an
 **Frontend Directory Structure**
 --------------------------------
 
-`
+```
 frontend/
 ├── src/
 │   ├── components/
@@ -101,7 +101,7 @@ frontend/
 │   ├── App.jsx
 │   └── main.jsx
 └── public/
-`
+```
 
 **Tech Stack**
 --------------
@@ -234,7 +234,7 @@ A small Python toolkit that cleans Mt. Sinai's Epic scheduling export and powers
 **Repository Layout**
 ---------------------
 
-`
+```
 ├── exams_cleanup.py          # Convert scheduling.csv → scheduling_clean.parquet
 ├── data/
 │   ├── scheduling.csv
@@ -249,7 +249,7 @@ A small Python toolkit that cleans Mt. Sinai's Epic scheduling export and powers
 │   ├── query_router.py
 │   └── update_helpers.py
 └── archive/
-`
+```
 
 **Data Pipeline**
 -----------------
