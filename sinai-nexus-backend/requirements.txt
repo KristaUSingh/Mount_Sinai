@@ -6,3 +6,4 @@ pyarrow
 rapidfuzz
 google-generativeai
 python-multipart
+faiss-cpu==1.7.4
