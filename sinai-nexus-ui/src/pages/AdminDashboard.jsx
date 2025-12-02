@@ -37,11 +37,12 @@ import {
 import DeleteIcon from "@mui/icons-material/Delete";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 
-import { useState, forwardRef } from "react";
+import { useState, useEffect, forwardRef } from "react";
 import { useNavigate } from "react-router-dom";
 import MSLogoWhite from "../assets/MSLogoWhite.png";
-
+import { supabase } from '../api/supabaseClient';
 import AgentChat from "./AgentChat";
+
 
 // Slide transition for delete modal
 const Transition = forwardRef(function Transition(props, ref) {
@@ -68,32 +69,91 @@ function AdminDashboard({ auth }) {
   // Toggle between Admin Dashboard and Chat Assistant
   const [showChat, setShowChat] = useState(false);
 
+   useEffect(() => {
+    loadAllFiles();
+    }, []);
+
   // -----------------------------
   // Backend Upload
   // -----------------------------
-  const handleUploadBackend = async (file) => {
-    const formData = new FormData();
-    formData.append("file", file);
-    try {
-      const res = await fetch("http://localhost:8000/upload", {
-        method: "POST",
-        body: formData,
-      });
-      const data = await res.json();
-
+  
+    const handleUploadSupabase = async (file) => {
+    if (!file || !fileType || !fileExtension) return;
+  
+     // Get actual file extension
+    const fileParts = file.name.split(".");
+    const actualExtension = fileParts[fileParts.length - 1].toLowerCase();
+  
+    // Check if actual extension matches selected fileExtension
+    if (actualExtension !== fileExtension.toLowerCase()) {
       setAlert({
         open: true,
-        msg: data.message || "Upload failed.",
-        type: data.message ? "success" : "error",
-      });
-    } catch {
-      setAlert({
-        open: true,
-        msg: "Error uploading to backend.",
+        msg: "File uploaded does not match file extension chosen",
         type: "error",
       });
+      return; // Stop upload
+    }
+  
+    // Choose bucket
+    const bucketName =
+      fileType === "Locations/Rooms" ? "epic-scheduling" : "other-content";
+  
+      const safeFolder = fileType.replace(/\//g, "_").replace(/ /g, "_"); // Locations_Rooms, General_Tips  
+      const filePath = `${safeFolder}/${file.name}`;
+  
+    try {
+      const { data, error } = await supabase.storage
+        .from(bucketName)
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false, 
+        });
+  
+      if (error) throw error;
+  
+      setAlert({
+        open: true,
+        msg: "File uploaded successfully!",
+        type: "success",
+      });
+  
+      console.log("Uploaded file info:", data);
+  
+    } catch (err) {
+  
+      if (
+        err.message &&
+        err.message.includes("mime type") &&
+        err.message.includes("is not supported")
+      ) {
+        setAlert({
+          open: true,
+          msg: "Storage does not support this file type",
+          type: "error",
+        });
+      }
+  
+      else if (
+        err.message && 
+        err.message.includes("The resource") &&
+        err.message.includes("already exists")
+      ) {
+        setAlert({
+          open:true,
+          msg: "A file with this name already exists. To replace it, delete the existing file and upload the new one",
+          type: "error",
+        });
+      }
+  
+      else {console.error(err);
+      setAlert({
+        open: true,
+        msg: "Error uploading file.",
+        type: "error",
+      });}
     }
   };
+
 
   // -----------------------------
   // Reset FAISS Index
@@ -117,38 +177,188 @@ function AdminDashboard({ auth }) {
   // -----------------------------
   // Add text note
   // -----------------------------
-  const handleAddPolicy = () => {
+  const handleAddPolicy = async () => {
     if (!noteTitle.trim() || !noteContent.trim()) return;
-
+  
     const noteData = {
       title: noteTitle.trim(),
       content: noteContent.trim(),
       created_at: new Date().toISOString(),
     };
-
+  
     const blob = new Blob([JSON.stringify(noteData, null, 2)], {
       type: "application/json",
     });
-
-    const newNote = {
-      name: `${noteTitle}.json`,
-      type: "note",
-      url: URL.createObjectURL(blob),
-    };
-
-    setFiles((prev) => [...prev, newNote]);
-    setNoteTitle("");
-    setNoteContent("");
+  
+    const fileName = `${noteTitle}`;
+  
+    // Upload locations
+    const uploads = [
+      { bucket: "epic-scheduling", folder: "Scheduling_Notes" },
+      { bucket: "other-content", folder: "Other_Notes" },
+    ];
+  
+    try {
+      let publicUrl = null;
+  
+      for (const { bucket, folder } of uploads) {
+        const safeFolder = folder.replace(/\//g, "_").replace(/ /g, "_");
+        const filePath = `${safeFolder}/${fileName}`;
+  
+        // Upload
+        const { error } = await supabase.storage
+          .from(bucket)
+          .upload(filePath, blob, { cacheControl: "3600", upsert: true });
+  
+        if (error) throw error;
+  
+        // Get public URL (use the first bucket’s URL)
+        if (!publicUrl) {
+          const { data: urlData } = supabase.storage
+            .from(bucket)
+            .getPublicUrl(filePath);
+          publicUrl = urlData.publicUrl;
+        }
+      }
+  
+      // Add to React state using real Supabase URL
+      const newNote = {
+        name: fileName,
+        type: "note",
+        url: publicUrl,
+      };
+  
+      setFiles((prev) => [...prev, newNote]);
+  
+      setAlert({
+        open: true,
+        msg: "Policy notes successfully uploaded",
+        type: "success",
+      });
+  
+      // Reset
+      setNoteTitle("");
+      setNoteContent("");
+  
+      // Reload lists
+      loadAllFiles();
+    } catch (err) {
+      console.error(err);
+      setAlert({
+        open: true,
+        msg: "Error uploading policy note.",
+        type: "error",
+      });
+    }
   };
+  
+  
+    // =========================================================
+    // VIEW + DELETE
+    // =========================================================
+  
+  const loadAllFiles = async () => {
+    const results = [];
+  
+    // -------------------------
+    // 1. epic-scheduling bucket
+    // -------------------------
+  
+    const loc_folders = ["Locations_Rooms", "Scheduling_Notes"];
+  
+    for(const folder of loc_folders) {
+      const { data: locRooms, error: err1 } = await supabase.storage
+        .from("epic-scheduling")
+        .list(folder, { limit: 200 });
+      if (err1) console.error(err1);
+      else {
+        locRooms.forEach((f) =>
+          results.push({
+            name: f.name,
+            bucket: "epic-scheduling",
+            folder,
+            fullPath: `${folder}/${f.name}`,
+            url: supabase.storage
+              .from("epic-scheduling")
+              .getPublicUrl(`${folder}/${f.name}`).data.publicUrl,
+              type: folder === "Scheduling_Notes" ? "note" : "protocol"
+          })
+        );
+      }
+    }
+  
+    // -------------------------
+    // 2. other-content bucket
+    // -------------------------
+    const folders = ["General_Tips", "Preps", "Other", "Other_Notes"];
+  
+    for (const folder of folders) {
+      const { data, error } = await supabase.storage
+        .from("other-content")
+        .list(folder, { limit: 200 });
+  
+      if (error) console.error(error);
+      else {
+        data.forEach((f) =>
+          results.push({
+            name: f.name,
+            bucket: "other-content",
+            folder,
+            fullPath: `${folder}/${f.name}`,
+            url: supabase.storage
+              .from("other-content")
+              .getPublicUrl(`${folder}/${f.name}`).data.publicUrl,
+              type: folder === "Other_Notes" ? "note" : "protocol"
+              
+          })
+        );
+      }
+    }
+  
+    setFiles(results);
+  };
+  
+  // =========================================================
+  // DELETE FILE
+  // =========================================================
 
-  // View selected file
-  const handleView = (url) => window.open(url, "_blank");
-
-  // Delete file
+  const handleDeleteSupabase = async (file) => {
+    if (!file || !file.bucket || !file.fullPath) {
+      console.error("Invalid file object for deletion:", file);
+      setAlert({
+        open: true,
+        msg: "Cannot delete: file info missing",
+        type: "error",
+      });
+      return;
+    }
+  
+    try {
+      const { error } = await supabase.storage
+        .from(file.bucket)
+        .remove([file.fullPath]);
+  
+      if (error) throw error;
+  
+      setAlert({ open: true, msg: "File deleted!", type: "success" });
+  
+      // Refresh list after deleting
+      loadAllFiles();
+  
+    } catch (err) {
+      console.error("Supabase deletion error:", err);
+      setAlert({ open: true, msg: "Error deleting file", type: "error" });
+    }
+  };
+  
   const confirmDelete = () => {
-    setFiles((prev) => prev.filter((f) => f.name !== fileToDelete));
+    if (!fileToDelete) return;
+    handleDeleteSupabase(fileToDelete);
     setOpenConfirm(false);
   };
+  
+  const handleView = (url) => window.open(url, "_blank");
+  
 
   // Greeting
   const getGreeting = () => {
@@ -311,6 +521,7 @@ function AdminDashboard({ auth }) {
                     variant="contained"
                     component="label"
                     disabled={!fileType || !fileExtension}
+                    onClick={() => selectedFile && handleUploadSupabase(selectedFile)}
                     sx={{
                       fontWeight: 600,
                       background:
@@ -347,22 +558,16 @@ function AdminDashboard({ auth }) {
                           color: "white",
                         }}
                         onClick={() => {
-                          handleUploadBackend(selectedFile);
+                          handleUploadSupabase(selectedFile)
+                          .then(() => {
+                            // Refresh list after successful upload
+                            loadAllFiles();
+                          });
 
-                          setFiles((prev) => [
-                            ...prev,
-                            {
-                              name: selectedFile.name,
-                              category: fileType,
-                              type: "protocol",
-                              url: URL.createObjectURL(selectedFile),
-                            },
-                          ]);
-
-                          setSelectedFile(null);
-                          setFileType("");
-                          setFileExtension("");
-                        }}
+                            setSelectedFile(null);
+                            setFileType("");
+                            setFileExtension("");
+                          }}
                       >
                         Submit to Knowledge Base
                       </Button>
@@ -489,7 +694,7 @@ function AdminDashboard({ auth }) {
                                 <IconButton
                                   color="error"
                                   onClick={() => {
-                                    setFileToDelete(file.name);
+                                    setFileToDelete(file);
                                     setOpenConfirm(true);
                                   }}
                                 >
@@ -539,7 +744,7 @@ function AdminDashboard({ auth }) {
             <DialogContent>
               <Typography>
                 Are you sure you want to delete{" "}
-                <strong>{fileToDelete}</strong>?
+                <strong>{fileToDelete?.name}</strong>?
               </Typography>
             </DialogContent>
 

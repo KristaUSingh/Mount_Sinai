@@ -33,12 +33,34 @@
 #   5. Save as Parquet (fast to load, reliable format)
 # -------------------------------------------------------------
 
+from supabase import create_client
 import pandas as pd
+from io import StringIO
+from dotenv import load_dotenv
+import os
+
+load_dotenv()  
 
 # -------------------------------------------------------------
-# Step 1 — Load the CSV file
+# Step 1 — Load the CSV file from supabase
 # -------------------------------------------------------------
-df = pd.read_csv("data/scheduling.csv")   
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+
+supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+bucket_name = "epic-scheduling"      # change if your bucket name is different
+file_path = "Locations_Rooms/scheduling.csv"         # path inside the bucket
+
+response = supabase.storage.from_(bucket_name).download(file_path)
+
+
+if not response:
+    raise Exception("Could not download file from Supabase")
+
+csv_string = response.decode("latin-1")   #convert bytes to text
+df = pd.read_csv(StringIO(csv_string))  #read into pandas
 
 
 # -------------------------------------------------------------
@@ -103,7 +125,6 @@ df = df[[
     "DEP Name",           # site
     "Room Name"           # room
 ]]
-
 
 # -------------------------------------------------------------
 # Step 8 — Save as Parquet (fast to load for backend)
