@@ -1,137 +1,349 @@
-# Mt. Sinai Scheduling Cleanup & Query Toolkit
+**Sinai Nexus --- Radiology Scheduling & Knowledge Assistant**
+============================================================
 
-A small Python toolkit that cleans Mt. Sinai’s Epic scheduling export and powers a question-answering assistant for technologists, schedulers, and support teams. The project turns the raw Excel/CSV feed into a normalized Parquet table and answers natural-language questions such as “Where is CT Head performed?” or “How long is a CT ABDOMEN visit?” using fuzzy matching and deterministic Pandas lookups, no RAG or embeddings required.
+**Sinai Nexus** is an integrated platform designed to streamline Radiology scheduling, protocol management, and knowledge lookup for the Mount Sinai Health System.\
+It combines a **deterministic scheduling query engine**, a **RAG-powered document assistant**, and a **modern React/MUI admin interface** into one unified toolkit for technologists, schedulers, and support staff.
 
----
+At its core, Sinai Nexus cleans and normalizes the large Epic scheduling export, turning it into a structured dataset for fast, accurate lookup of exams, locations, rooms, and visit durations.\
+On top of this data layer, the platform provides two fully connected interfaces:
 
-## Repository Layout
+### **1\. Radiology Scheduling Assistant (LLM-guided, deterministic results)**
+
+Agents can ask natural-language questions such as:
+
+-   "Where is MRI Brain performed?"
+
+-   "Which rooms at 1176 5th Ave do CT Abdomen?"
+
+-   "How long is a CT Chest scan?"
+
+The system uses Gemini to detect intent and extract exam/site text, but all answers come from **exact Pandas filters and RapidFuzz matching** --- ensuring results are trustworthy, audit-friendly, and aligned with official scheduling tables.
+
+### **2\. Radiology Document Q&A Assistant (RAG)**
+
+The platform ingests protocol PDFs, DOCX files, Markdown, and notes into a FAISS index.\
+Agents can ask:
+
+-   "What are the contraindications for MRI abdomen?"
+
+-   "What's the prep for renal ultrasound?"
+
+-   "Find the document that explains contrast rules."
+
+This enables fast retrieval of unstructured radiology guidance without manually searching multiple folders or binders.
+
+### **3\. Radiology Admin Dashboard (File Uploads + Knowledge Management)**
+
+Admins can upload new documents, add internal notes, manage protocol categories, and reset the FAISS index --- all through a clean, glass-styled UI.\
+A built-in toggle lets admins instantly switch between managing content and testing the assistant.
+
+**Frontend: Radiology Admin & Agent Portal (React + MUI)**
+==========================================================
+
+The frontend provides two integrated interfaces:
+
+1.  **Radiology Admin Dashboard** Used by supervisors or knowledge-base managers to upload documents, protocols, and internal notes, and to trigger backend FAISS re-indexing.
+
+2.  **Radiology Agent Chat Portal** Used by scheduling agents to chat with the Mount Sinai Radiology Assistant (Scheduling Engine + RAG Engine). Supports multi-chat threads, automatic summarization, structured responses, and instant switching between Scheduling Q&A and Document Q&A.
+
+Both UIs are built with **React + Vite**, styled using **Material UI (MUI)**, and communicate directly with the FastAPI backend.
+
+**Frontend Features**
+---------------------
+
+### ✅ **Admin Dashboard**
+
+-   Upload protocol files (PDF, DOCX, CSV, XLSX, Markdown)
+
+-   Save custom policy notes (stored as JSON)
+
+-   Submit files directly to backend ingestion
+
+-   Trigger FAISS index resets
+
+-   View/delete uploaded files
+
+-   Aesthetic "Apple-style" gradient toggle between Admin ↔ Chat modes
+
+### ✅ **Radiology Agent Chat Assistant**
+
+-   Separate chat types:
+
+    -   **Scheduling Chat** → calls /agent-chat
+
+    -   **Document Q&A Chat** → calls /rag-chat
+
+-   Automatic detection and bullet-point rendering of exam lists, rooms, and sites
+
+-   Multi-thread, persistent chat history (stored in localStorage)
+
+-   Automatic chat title generation based on first user question
+
+-   Smooth auto-scroll (including delay when switching from Admin → Chat to avoid race conditions)
+
+-   Navbar hidden automatically when embedded inside Admin view
+
+**Frontend Directory Structure**
+--------------------------------
 
 ```
-├── exams_cleanup.py          # One-off script to convert scheduling.csv → scheduling_clean.parquet
-├── data/
-│   ├── scheduling.csv        # Raw Epic export (input)
-│   ├── mapping.json          # Room-prefix → department mapping
-│   ├── scheduling_clean.parquet
-│   └── updates.json          # Optional availability overrides
+frontend/
 ├── src/
-│   ├── data_loader.py        # Loads parquet + mappings once for the whole app
-│   ├── fuzzy_matchers.py     # RapidFuzz helpers for exam/site name resolution
-│   ├── query_handlers.py     # Business logic for each supported intent
-│   ├── query_interpreter.py  # Gemini prompt that turns NL into structured intents
-│   ├── query_router.py       # Entry point that ties interpreter + handlers together
-│   └── update_helpers.py     # Utilities for marking exams temporarily unavailable
-└── archive/                  # Legacy versions kept for reference
+│   ├── components/
+│   │   ├── AdminDashboard.jsx      # Upload UI, policy notes, file table, index reset
+│   │   ├── AgentChat.jsx           # Multi-thread AI chat interface
+│   │   └── Shared/                 # Reusable UI pieces
+│   ├── context/
+│   │   └── useAuth.jsx             # Authentication provider (Supabase or custom)
+│   ├── api/
+│   │   └── supabaseClient.js       # Supabase client setup
+│   ├── assets/                     # Logos and images
+│   ├── App.jsx
+│   └── main.jsx
+└── public/
 ```
 
----
+**Tech Stack**
+--------------
 
-## Data Pipeline
+| Area | Library / Tool |
+| --- | --- |
+| Framework | React (Vite) |
+| Styling | Material-UI (MUI) |
+| Authentication | Supabase Auth |
+| State Management | React hooks + localStorage persistence |
+| Backend Communication | `fetch()` → FastAPI endpoints |
+| UI Style | Glassmorphism, layered blur cards, Apple-style gradients |
+| Routing | React Router |
 
-1. **Drop the latest Epic export** into `data/scheduling.csv` along with the current `data/mapping.json`.
-2. **Run the cleanup script** (see “Usage” below). `exams_cleanup.py` normalizes multi-line cells, maps room prefixes to official departments, filters to Manhattan sites, and writes `data/scheduling_clean.parquet` for fast reloads.
-3. **Query from Parquet**. `src/data_loader.py` exposes the dataset, room map, and `updates.json` overrides so every module reads the same in-memory objects.
+**Running the Frontend**
+------------------------
 
-Because the data stays structured (columns like `EAP Name`, `DEP Name`, `Visit Type Length`, `Room Name`), business logic remains transparent and debuggable compared to embedding-based search.
+### **1\. Install dependencies**
 
----
+`
+cd frontend
+npm install
+`
 
-## Query Engine
+### **2\. Supabase Environment Variables (if needed)**
+
+Create .env:
+
+`
+VITE_SUPABASE_URL=your-url
+VITE_SUPABASE_KEY=your-key
+`
+
+### **3\. Start development server**
+
+`
+npm run dev
+`
+
+The app runs at:
+
+**http://localhost:5173**
+
+Make sure the backend FastAPI server is running at [**http://localhost:8000**](http://localhost:8000).
+
+**Frontend Architecture**
+-------------------------
+
+### **Admin ↔ Chat Toggle**
+
+AdminDashboard.jsx fully replaces the page content with <AgentChat hideNavbar={true} /> when toggled, preventing duplicate navbars.
+
+### **Chat Thread Persistence**
+
+Stored in:
+
+`
+localStorage["msAgentChats_v1"]
+`
+
+Each chat object includes:
+
+-   id
+
+-   mode (schedule or rag)
+
+-   title
+
+-   messages[]
+
+-   timestamps
+
+### **Auto-scroll Behavior**
+
+Two layers:
+
+-   Real-time autoscroll on new messages
+
+-   Delayed scroll after mount when switching from Admin → Chat
+
+**Endpoints Called by the Frontend**
+------------------------------------
+
+| Endpoint | Method | Used In | Purpose |
+| --- | --- | --- | --- |
+| `/agent-chat` | POST | AgentChat | Structured scheduling engine |
+| `/rag-chat` | POST | AgentChat | RAG/FAISS document Q&A |
+| `/upload` | POST | AdminDashboard | Upload files for indexing |
+| `/init_index` | POST | AdminDashboard | Reset entire FAISS store |
+
+**Adding New Frontend Features**
+--------------------------------
+
+### New chat mode
+
+1.  Add a new mode string
+
+2.  Add a button in sidebar
+
+3.  Add new endpoint logic in sendToBackend()
+
+### PDF preview
+
+Add a modal + <iframe /> viewer or integrate PDF.js.
+
+### Route protection
+
+Wrap UI inside:
+
+`
+if (!auth?.isLoggedIn) return <Navigate to="/login" />;
+`
+
+**Frontend Troubleshooting**
+----------------------------
+
+-   **Double navbar showing** → Pass hideNavbar={true} when embedding Chat inside Admin
+
+-   **Autoscroll not working on load** → Ensure setTimeout(() => scrollIntoView(), 150) exists
+
+-   **Messages appear but no response** → Backend URLs must match current deployment (localhost vs Vercel/Railway)
+
+-   **Uploads show but don't index** → Backend /upload must accept file type being used
+
+**Backend: Mt. Sinai Scheduling Cleanup & Query Toolkit**
+=========================================================
+
+A small Python toolkit that cleans Mt. Sinai's Epic scheduling export and powers a question-answering assistant for technologists, schedulers, and support teams. The project turns the raw Excel/CSV feed into a normalized Parquet table and answers natural-language questions such as "Where is CT Head performed?" or "How long is a CT ABDOMEN visit?" using fuzzy matching and deterministic Pandas lookups, no RAG or embeddings required.
+
+**Repository Layout**
+---------------------
+
+```
+├── exams_cleanup.py          # Convert scheduling.csv → scheduling_clean.parquet
+├── data/
+│   ├── scheduling.csv
+│   ├── mapping.json
+│   ├── scheduling_clean.parquet
+│   └── updates.json
+├── src/
+│   ├── data_loader.py
+│   ├── fuzzy_matchers.py
+│   ├── query_handlers.py
+│   ├── query_interpreter.py
+│   ├── query_router.py
+│   └── update_helpers.py
+└── archive/
+```
+
+**Data Pipeline**
+-----------------
+
+1.  Drop latest Epic export into data/scheduling.csv
+
+2.  Run cleanup script → Produces scheduling_clean.parquet
+
+3.  All modules query from a single shared in-memory dataset
+
+**Query Engine**
+----------------
 
 | Component | Responsibility |
 | --- | --- |
-| `query_interpreter.py` | Uses Gemini (via `GOOGLE_API_KEY`) to detect intent (`exam_at_site`, `locations_for_exam`, `exams_at_site`, `exam_duration`, `rooms_for_exam_at_site`) and extract raw exam/site text. |
-| `fuzzy_matchers.py` | Expands abbreviations, strips filler words, and runs RapidFuzz similarity search so user phrasing (“ct head wo contrast”) maps to canonical names. |
-| `query_handlers.py` | Implements deterministic Pandas lookups for each intent, honoring any temporary disables recorded in `data/updates.json`. |
-| `query_router.py` | Glue function: call it with a user question, it prints Gemini’s interpretation and returns a human answer string. |
-| `update_helpers.py` | Optional admin helpers to disable or re-enable specific exam/site combinations without touching the parquet. |
+| `query_interpreter.py` | Gemini → intent extraction |
+| `fuzzy_matchers.py` | RapidFuzz name resolution |
+| `query_handlers.py` | Deterministic Pandas logic |
+| `query_router.py` | Intent routing + natural language answers |
+| `update_helpers.py` | Temporary overrides for outages |
 
----
+**Backend Setup**
+-----------------
 
-## Setup
+`
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+`
 
-1. **Python**: 3.10+ recommended.
-2. **Install dependencies**:
+Environment variable:
 
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   pip install -r requirements.txt
-   ```
+`
+GOOGLE_API_KEY=your-key-here
+`
 
-3. **Environment variables**: create a `.env` alongside the repo with your Gemini key:
+**Usage**
+---------
 
-   ```
-   GOOGLE_API_KEY=your-key-here
-   ```
+### Build the parquet dataset
 
-4. **Data files**: ensure `data/scheduling.csv` and `data/mapping.json` exist before cleaning; `data/updates.json` will be created automatically if missing.
-
----
-
-## Usage
-
-### 1. Build / refresh the parquet dataset
-
-```bash
+`
 python3 exams_cleanup.py
-```
+`
 
-Outputs `data/scheduling_clean.parquet`, filtering to the Manhattan locations listed inside the script.
+### Ask questions
 
-### 2. Ask questions programmatically
-
-```python
+`
 from src.query_router import answer_scheduling_query
+print(answer_scheduling_query("Where is CT CHEST performed?"))
+`
 
-print(answer_scheduling_query("Is CT HEAD WO IV CONTRAST done at 1176 Fifth Ave?"))
-print(answer_scheduling_query("Where can I schedule CT CHEST W CONTRAST?"))
-print(answer_scheduling_query("How long is an MRI BRAIN WO/W IV?"))
-print(answer_scheduling_query("Which rooms at 1470 Madison Ave perform CT Head?"))
-```
+### Manage outages
 
-Internally this will:
-1. Use Gemini to classify the question.
-2. Run RapidFuzz to map free text to official exam/site names.
-3. Execute deterministic Pandas filters against `data/scheduling_clean.parquet`.
-4. Apply any temporary overrides from `data/updates.json`.
-5. Return a readable string (and print Gemini’s parsed intent for debugging).
+`
+disable_exam("CT HEAD WO IV", "1176 5TH AVE", reason="Maintenance")
+`
 
-### 3. Manage temporary outages (optional)
+**How to run files**
+--------------------
 
-```python
-from src.update_helpers import disable_exam, enable_exam
+-   Navigate to repo root
 
-disable_exam("CT HEAD WO IV CONTRAST", "1176 5TH AVE RAD CT", reason="Scanner maintenance")
-enable_exam("CT HEAD WO IV CONTRAST", "1176 5TH AVE RAD CT")
-```
+-   Use python -m folder.filename
 
-These helpers append/remove entries inside `data/updates.json`, ensuring downstream queries know when a modality is down.
+Example:
 
----
+`
+python -m testing.test_general
+`
 
-## How to run files
-- If you want to run any file, make sure you are in the root directory, and run 'python -m folder.filename'
-- i.e. To run testing/test_general.py, navigate to root directory and run 'python -m testing.test_general'
+**Extending the Toolkit**
+-------------------------
 
-## Extending the Toolkit
+-   Add intents
 
-- **Add new intents**: implement the handler in `query_handlers.py`, expose it in `query_router.py`, and update the Gemini prompt in `query_interpreter.py`.
-- **Expand site coverage**: adjust the `manhattan_sites` list in `exams_cleanup.py` or move it into a config file.
-- **New room mappings**: update `data/mapping.json` with additional prefix → department pairs before running the cleanup script.
-- **Logging / telemetry**: wrap `answer_scheduling_query` to capture user questions, parsed intents, and handler outputs.
+-   Expand site list
 
----
+-   Update mappings
 
-## Troubleshooting
+-   Add logging layers
 
-- **“Parquet not found”**: run `python3 exams_cleanup.py` to regenerate it.
-- **Gemini errors**: confirm `.env` is loaded before importing `query_interpreter.py`.
-- **Unexpected matches**: inspect `fuzzy_matchers.normalize_text()` and thresholds; RapidFuzz scores >55 (exams) and >60 (sites) are required to accept a match.
-- **Temporary overrides ignored**: ensure `data/updates.json` is writable and that `disable_exam` entries use exact exam/site strings.
+**Backend Troubleshooting**
+---------------------------
 
----
+-   Parquet missing → run cleanup script
 
-## Why Not RAG?
+-   Gemini errors → check .env
 
-The assistant already answers questions by mapping user language to structured columns and running explicit filters, so results stay deterministic, auditable, and fast. Large Language Models only classify intent and extract entities; they do not search the dataset directly. If you later ingest narrative policies or notes, you can layer RAG on top, but for tabular scheduling data this direct approach is simpler and more trustworthy.
+-   Bad matches → tune RapidFuzz thresholds
 
+-   Overrides ignored → update updates.json
+
+**Why Not RAG?**
+----------------
+
+Structured scheduling data is best queried with deterministic lookups, not embeddings. LLM is only used for **intent detection**, not dataset search.
