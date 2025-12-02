@@ -1,27 +1,27 @@
-# Use full Python image so FAISS installs correctly
-FROM python:3.11
+# Use slim Python image for lower memory
+FROM python:3.11-slim
+
+# Prevent Python from buffering logs
+ENV PYTHONUNBUFFERED=1
 
 # Set working directory
 WORKDIR /app
 
-# Copy requirements first for better caching
-COPY requirements.txt .
-
-# Install OS packages required for FAISS
+# Install only necessary system packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Copy requirements first (cache friendly)
+COPY requirements.txt .
+
+# Install Python packages with no-cache
 RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy backend code
 COPY . .
 
-# Expose FastAPI port
-EXPOSE 8000
-
-# Start FastAPI
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Render sets $PORT dynamically — DO NOT hardcode 8000
+CMD ["bash", "-c", "uvicorn main:app --host 0.0.0.0 --port $PORT"]
