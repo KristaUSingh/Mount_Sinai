@@ -2,58 +2,68 @@ import os
 import faiss
 import numpy as np
 import google.generativeai as genai
+
 from fastapi import FastAPI, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
-from unstructured.partition.auto import partition
-from sentence_transformers import SentenceTransformer
+from pydantic import BaseModel
 from dotenv import load_dotenv
 
+from unstructured.partition.auto import partition
+from sentence_transformers import SentenceTransformer
+
 # ------------------------------
-# Gaurav Scheduling Backend
+# Sinai Nexus Scheduling Backend
 # ------------------------------
 from src.query_router import answer_scheduling_query
-from pydantic import BaseModel
 
-class AgentChatRequest(BaseModel):
-    question: str
 
 # ------------------------------
-# Load ENV + Gemini Config
+# Load ENV + Configure Gemini
 # ------------------------------
 load_dotenv()
 
-# If using Gemini API key:
 if os.getenv("GOOGLE_API_KEY"):
     genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 else:
-    # If using Vertex AI service account JSON:
-    genai.configure()
+    genai.configure()   # uses ADC / Vertex service account
+
 
 # ------------------------------
 # FAISS + Embedding Model Setup
 # ------------------------------
 embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+
 faiss_index = None
 chunks_map = {}
 
+
 # ------------------------------
-# FastAPI App Init + CORS
+# FastAPI App Init
 # ------------------------------
-app = FastAPI()
+app = FastAPI(title="Sinai Nexus Backend")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],       # ⭐ Vercel frontend allowed
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
+# ------------------------------
+# Models
+# ------------------------------
+class AgentChatRequest(BaseModel):
+    question: str
+
+
 # ===============================================================
-# 🔹 1. GAURAV SCHEDULING ENDPOINT  (AgentChat UI)
+# 1️⃣ Scheduling Assistant Endpoint
 # ===============================================================
 @app.post("/agent-chat")
 def agent_chat(payload: AgentChatRequest):
-    """Mount Sinai Scheduling Assistant"""
+    """Deterministic scheduling Q&A"""
     try:
         answer = answer_scheduling_query(payload.question)
         return {"answer": answer}
@@ -62,26 +72,31 @@ def agent_chat(payload: AgentChatRequest):
 
 
 # ===============================================================
-# 🔹 2. INITIALIZE FAISS INDEX
+# 2️⃣ Initialize FAISS Index
 # ===============================================================
 @app.post("/init_index")
 def init_index():
+    """Creates a fresh FAISS index"""
     global faiss_index, chunks_map
+
     faiss_index = faiss.IndexFlatL2(384)
     chunks_map = {}
+
     return {"message": "FAISS index initialized."}
 
 
 # ===============================================================
-# 🔹 3. UPLOAD FILE → PARSE → CHUNK → EMBED → FAISS
+# 3️⃣ Upload → Parse → Chunk → Embed → Add to FAISS
 # ===============================================================
 @app.post("/upload")
 async def upload_file(file: UploadFile):
+    """Upload document and add to RAG index"""
     global faiss_index, chunks_map
 
     os.makedirs("uploads", exist_ok=True)
     path = f"uploads/{file.filename}"
 
+    # Save file
     with open(path, "wb") as f:
         f.write(await file.read())
 
@@ -89,50 +104,55 @@ async def upload_file(file: UploadFile):
     elements = partition(filename=path)
     text = "\n".join([el.text for el in elements if el.text])
 
-    # Chunk text
-    chunk_size, overlap = 800, 100
+    # Chunking
+    chunk_size = 800
+    overlap = 100
     chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size - overlap)]
 
     # Embed chunks
-    embeds = embedding_model.encode(chunks)
+    embeddings = embedding_model.encode(chunks)
 
-    # Create FAISS if needed
+    # Create index if needed
     if faiss_index is None:
-        faiss_index = faiss.IndexFlatL2(embeds.shape[1])
+        faiss_index = faiss.IndexFlatL2(embeddings.shape[1])
 
-    start = faiss_index.ntotal
-    faiss_index.add(np.array(embeds))
+    start_index = faiss_index.ntotal
+    faiss_index.add(np.array(embeddings))
 
-    # Store chunk mapping
+    # Store mapping
     for i, chunk in enumerate(chunks):
-        chunks_map[start + i] = chunk
+        chunks_map[start_index + i] = chunk
 
-    return {"message": f"Indexed {len(chunks)} chunks from {file.filename}"}
+    return {
+        "message": f"Indexed {len(chunks)} chunks from {file.filename}",
+        "chunks_added": len(chunks)
+    }
 
 
 # ===============================================================
-# 🔹 4. RAG CHAT: QUERY FAISS + USE GEMINI
+# 4️⃣ RAG Chat (FAISS + Gemini)
 # ===============================================================
 @app.post("/rag-chat")
 async def rag_chat(query: str = Form(...)):
     global faiss_index, chunks_map
 
     if faiss_index is None:
-        return {"error": "No data indexed yet. Upload a file first."}
+        return {"error": "No documents indexed yet. Upload a file first."}
 
     # Embed query
-    q_emb = embedding_model.encode([query])
-    D, I = faiss_index.search(np.array(q_emb), k=5)
+    q_embed = embedding_model.encode([query])
+    D, I = faiss_index.search(np.array(q_embed), k=5)
 
-    # Build context from nearest chunks
+    # Gather retrieved chunks
     context = "\n\n".join([chunks_map.get(i, "") for i in I[0]])
 
-    # Gemini prompt
+    # Gemini Prompt
     prompt = f"""
 You are a Mount Sinai Radiology assistant.
-Give all answers in plain text with NO markdown, NO asterisks.
-Use the provided context to answer the question.
-If information is missing, say you are unsure instead of guessing.
+Give ALL answers in plain text. No markdown. No asterisks.
+
+Use the provided text below when answering. 
+If the document does not contain the answer, say you are unsure.
 
 Context:
 {context}
@@ -146,3 +166,10 @@ Question:
 
     return {"answer": response.text.strip()}
 
+
+# ===============================================================
+# HEALTH CHECK
+# ===============================================================
+@app.get("/")
+def home():
+    return {"message": "Sinai Nexus Backend is running!"}
