@@ -108,6 +108,6 @@ df = df[[
 # -------------------------------------------------------------
 # Step 8 — Save as Parquet (fast to load for backend)
 # -------------------------------------------------------------
-df.to_parquet("data/scheduling_clean.parquet", index=False)
+df.to_parquet("data/new_scheduling_clean.parquet", index=False)
 
-print("✅ Cleaned scheduling file saved as scheduling_clean.parquet")
+print("✅ Cleaned scheduling file saved as new_scheduling_clean.parquet")
