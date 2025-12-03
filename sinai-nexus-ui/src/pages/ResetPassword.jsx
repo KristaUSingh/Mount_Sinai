@@ -33,7 +33,7 @@ function ResetPassword() {
 
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(data.email, {
-        redirectTo: "http://localhost:5173/update-password",
+        redirectTo: "http://sinainexus.vercel.app/update-password",
       });
 
       if (error) throw error;
