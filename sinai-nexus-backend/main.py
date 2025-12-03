@@ -48,7 +48,7 @@ embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 app = FastAPI(title="Sinai Nexus Backend (Supabase RAG)")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],       #  Vercel frontend allowed
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
