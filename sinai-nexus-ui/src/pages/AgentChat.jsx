@@ -84,7 +84,7 @@ function AgentChat({ auth, hideNavbar = false }) {
       messages: [
         {
           sender: "bot",
-          text: "Welcome to the Mount Sinai Radiology Assistant. How can I help you today?",
+          text: "Welcome to the Sinai Nexus. How can I help you today?",
         },
       ],
     };
@@ -226,7 +226,7 @@ function AgentChat({ auth, hideNavbar = false }) {
           messages: [
             {
               sender: "bot",
-              text: "Welcome to the Mount Sinai Radiology Assistant. How can I help you today?",
+              text: "Welcome to the Sinai Nexus. How can I help you today?",
             },
           ],
         };
@@ -352,7 +352,7 @@ function AgentChat({ auth, hideNavbar = false }) {
             <Box display="flex" alignItems="center" gap={1.5}>
               <img src={MSLogoWhite} alt="Mount Sinai" width={42} />
               <Typography variant="h6" fontWeight="bold">
-                Mount Sinai Radiology Agent Portal
+                Sinai Nexus Agent Portal
               </Typography>
             </Box>
 

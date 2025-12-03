@@ -53,7 +53,7 @@ export default function Landing() {
             color: "#002F6C",
           }}
         >
-          Welcome to Mount Sinai Radiology Assistant
+          Welcome to Sinai Nexus!
         </Typography>
 
         <Typography
