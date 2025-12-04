@@ -79,11 +79,16 @@ def exam_at_site(exam_query, site_query):
 # -------------------------------------------------------------
 def locations_for_exam(exam_query):
     exams = best_exam_match(exam_query)
+    print("DEBUG – exams matched for locations_for_exam:", exams)
+
     if not exams:
         return []
 
-    # All rows that match any of the likely official exam names
-    matches = df[df["EAP Name"].isin(exams)]
+    # Choose the best exam match (first in the list)
+    exam = exams[0]
+
+    # All rows that match any of the most likely exam name
+    matches = df[df["EAP Name"] == exam]
 
     # Return distinct site names as a simple Python list
     return matches["DEP Name"].drop_duplicates().tolist()

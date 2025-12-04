@@ -14,7 +14,7 @@ import pandas as pd
 import json
 
 # Load the cleaned scheduling data
-df = pd.read_parquet("data/scheduling_clean.parquet")
+df = pd.read_parquet("data/new_scheduling_clean.parquet")
 
 # Load prefix-to-department mapping
 with open("data/mapping.json") as f:

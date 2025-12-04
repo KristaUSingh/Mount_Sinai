@@ -1,0 +1,4 @@
+## NOTES ON PROJECT DATA 
+
+**mapping.json** contains room names mapped to location addresses BUT it is INCOMPLETE
+Within **exams_cleanup.py**, manhattan_sites lists the relevant locations. This list is also incomplete. 

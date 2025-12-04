@@ -18,7 +18,7 @@ ABBREV_MAP = {
     r"\biv\b": "intravenous"
 }
 
-IGNORE_WORDS = ["intravenous", "iv", "contrast", "exam", "study"]
+IGNORE_WORDS = ["exam", "study"]
 
 def normalize_text(s: str):
     """Simplify text (expand abbreviations, remove filler words)."""
