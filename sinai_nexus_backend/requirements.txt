@@ -7,7 +7,7 @@ pyarrow
 rapidfuzz
 google-generativeai
 python-multipart
-sentence-transformers
+sentence-transformers==2.2.2
 scikit-learn
 unstructured
 pypdf
