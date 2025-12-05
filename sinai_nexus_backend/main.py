@@ -176,27 +176,39 @@ class DeleteRequest(BaseModel):
 async def delete_file(req: DeleteRequest):
     raw = req.file_path.strip()
 
-    # Example raw: "other-content/Other_Notes/UIDs_not_safe"
-    # Remove bucket → only keep folder + filename
     if "/" in raw:
-        parts = raw.split("/", 1)   # remove only first slash group
-        target = parts[1]           # "Other_Notes/UIDs_not_safe"
+        _, target = raw.split("/", 1)
     else:
         target = raw
 
-    print("Deleting rows with file_path starting with:", target)
+    print("Normalized delete target:", target)
 
-    # Use startswith (prefix) instead of ilike
-    result = (
+    # STEP 1: Select all rows with matching prefix
+    query = (
         supabase.table("documents")
-        .delete()
+        .select("id, file_path")
         .like("file_path", f"{target}%")
         .execute()
     )
 
+    rows = query.data or []
+
+    if not rows:
+        return {"message": "No rows to delete", "deleted": []}
+
+    ids = [r["id"] for r in rows]
+
+    # STEP 2: Delete using IN clause
+    delete_res = (
+        supabase.table("documents")
+        .delete()
+        .in_("id", ids)
+        .execute()
+    )
+
     return {
-        "message": f"Deleted {len(result.data)} chunks",
-        "deleted_rows": result.data
+        "message": f"Deleted {len(delete_res.data)} rows",
+        "deleted": delete_res.data
     }
 
 
