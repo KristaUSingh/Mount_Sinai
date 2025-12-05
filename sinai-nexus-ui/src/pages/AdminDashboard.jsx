@@ -67,6 +67,8 @@ function AdminDashboard({ auth }) {
  const [fileType, setFileType] = useState("");
  const [fileExtension, setFileExtension] = useState("");
  const [selectedFile, setSelectedFile] = useState(null);
+ const [noteCategory, setNoteCategory] = useState("");
+
 
 
  const [openConfirm, setOpenConfirm] = useState(false);
@@ -78,6 +80,10 @@ function AdminDashboard({ auth }) {
 
  // Toggle between Admin Dashboard and Chat Assistant
  const [showChat, setShowChat] = useState(false);
+
+ const [filterType, setFilterType] = useState("All"); 
+ const [filterCategory, setFilterCategory] = useState("All");
+
 
 
   useEffect(() => {
@@ -191,166 +197,234 @@ function AdminDashboard({ auth }) {
  // -----------------------------
  // Reset FAISS Index
  // -----------------------------
- const handleResetIndex = async () => {
-   try {
-     const res = await fetch("https://sinai-nexus-backend.onrender.com/init_index", {
-       method: "POST",
-     });
-     const data = await res.json();
-     setAlert({ open: true, msg: data.message, type: "success" });
-   } catch {
-     setAlert({
-       open: true,
-       msg: "Failed to reset index.",
-       type: "error",
-     });
-   }
- };
-
-
- // -----------------------------
- // Add text note
- // -----------------------------
- const handleAddPolicy = async () => {
-   if (!noteTitle.trim() || !noteContent.trim()) return;
-    const noteData = {
-     title: noteTitle.trim(),
-     content: noteContent.trim(),
-     created_at: new Date().toISOString(),
-   };
-    const blob = new Blob([JSON.stringify(noteData, null, 2)], {
-     type: "application/json",
-   });
-    const fileName = `${noteTitle}`;
-    // Upload locations
-   const uploads = [
-     { bucket: "epic-scheduling", folder: "Scheduling_Notes" },
-     { bucket: "other-content", folder: "Other_Notes" },
-   ];
+  const handleResetIndex = async () => {
     try {
-     let publicUrl = null;
-      for (const { bucket, folder } of uploads) {
-       const safeFolder = folder.replace(/\//g, "_").replace(/ /g, "_");
-       const filePath = `${safeFolder}/${fileName}`;
-        // Upload
-       const { error } = await supabase.storage
-         .from(bucket)
-         .upload(filePath, blob, { cacheControl: "3600", upsert: true });
-        if (error) throw error;
-        // Get public URL (use the first bucket’s URL)
-       if (!publicUrl) {
-         const { data: urlData } = supabase.storage
-           .from(bucket)
-           .getPublicUrl(filePath);
-         publicUrl = urlData.publicUrl;
-       }
-
-
-       // Other_Notes → /upload (UploadFile + priority)
-       if (folder === "Other_Notes") {
-         const formData = new FormData();
-         formData.append("file", blob);
-         formData.append("priority", "1"); // default priority
-         formData.append("path",`${bucket}/${filePath}`);
-
-
-         await fetch("https://sinai-nexus-backend.onrender.com/upload", {
-           method: "POST",
-           body: formData,
-         });
-       }
-
-
-       //  Scheduling_Notes → skip for now (folder === "Scheduling_Notes")
-       else {
-         // intentionally do nothing
-         console.log("Skipping Scheduling_Notes backend upload for now.");
-       }
-     }
-      // Add to React state using real Supabase URL
-     const newNote = {
-       name: fileName,
-       type: "note",
-       url: publicUrl,
-     };
-      setFiles((prev) => [...prev, newNote]);
+      const res = await fetch("https://sinai-nexus-backend.onrender.com/init_index", {
+        method: "POST",
+      });
+      const data = await res.json();
+      setAlert({ open: true, msg: data.message, type: "success" });
+    } catch {
       setAlert({
-       open: true,
-       msg: "Policy notes successfully uploaded",
-       type: "success",
-     });
-      // Reset
-     setNoteTitle("");
-     setNoteContent("");
-      // Reload lists
-     loadAllFiles();
-   }
-   catch (err) {
-     console.error(err);
-     setAlert({
-       open: true,
-       msg: "Error uploading policy note.",
-       type: "error",
-     });
-   }
- };
- 
+        open: true,
+        msg: "Failed to reset index.",
+        type: "error",
+      });
+    }
+  };
+
+
+  // -----------------------------
+  // Add text note
+  // -----------------------------
+  const handleAddPolicy = async () => {
+    if (!noteTitle.trim() || !noteContent.trim() || !noteCategory) {
+      setAlert({
+        open: true,
+        msg: "Please enter title, content, and category",
+        type: "error",
+      });
+      return;
+    }
+  
+    const noteData = {
+      title: noteTitle.trim(),
+      content: noteContent.trim(),
+      category: noteCategory,
+      created_at: new Date().toISOString(),
+    };
+  
+    const blob = new Blob([JSON.stringify(noteData, null, 2)], {
+      type: "application/json",
+    });
+  
+    const fileName = `${noteTitle.trim().replace(/ /g, "_")}.json`;
+  
+    // Bucket selection identical to file upload
+    const isLocations = noteCategory === "Locations/Rooms";
+    const bucket = isLocations ? "epic-scheduling" : "other-content";
+    const folder = isLocations ? "Scheduling_Notes" : "Other_Notes";
+    const safeFolder = folder.replace(/\//g, "_").replace(/ /g, "_");
+    const filePath = `${safeFolder}/${fileName}`;
+  
+    try {
+      // Upload JSON to Supabase
+      const { error } = await supabase.storage
+        .from(bucket)
+        .upload(filePath, blob, { cacheControl: "3600", upsert: true });
+  
+      if (error) throw error;
+  
+      const { data: urlData } = supabase.storage
+        .from(bucket)
+        .getPublicUrl(filePath);
+      const publicUrl = urlData.publicUrl;
+  
+      // All notes use /upload
+      const formData = new FormData();
+      formData.append("file", blob);
+      formData.append("priority", "1");
+      formData.append("path", `${bucket}/${filePath}`);
+  
+      await fetch("https://sinai-nexus-backend.onrender.com/upload", {
+        method: "POST",
+        body: formData,
+      });
+  
+      // Wait to refresh Supabase listing BEFORE updating UI
+      await loadAllFiles();
+  
+      setAlert({
+        open: true,
+        msg: "Note saved successfully!",
+        type: "success",
+      });
+  
+      // Reset fields
+      setNoteTitle("");
+      setNoteContent("");
+      setNoteCategory(""); // forces dropdown reset
+  
+    } catch (err) {
+      console.error(err);
+      setAlert({
+        open: true,
+        msg: "Error uploading note.",
+        type: "error",
+      });
+    }
+  };
+  
+
+
+  const fetchJsonCategory = async (bucket, path) => {
+    try {
+      const { data, error } = await supabase.storage.from(bucket).download(path);
+      if (error) return null;
+  
+      const text = await data.text();
+      const parsed = JSON.parse(text);
+      return parsed.category || null;
+    } catch (err) {
+      console.error("Failed to load note JSON:", err);
+      return null;
+    }
+  };  
+
+  const mapFolderToCategory = (folder) => {
+    switch (folder) {
+      case "Locations_Rooms":
+        return "Locations/Rooms";
+      case "General_Tips":
+        return "General Tips";
+      case "Preps":
+        return "Preps";
+      case "Other":
+        return "Other";
+      default:
+        return null;
+    }
+  };  
+
+
    // =========================================================
    // VIEW + DELETE
    // =========================================================
-  const loadAllFiles = async () => {
-   const results = [];
-    // -------------------------
-   // 1. epic-scheduling bucket
-   // -------------------------
+   const loadAllFiles = async () => {
+    const results = [];
+  
+    // ---------------------------------------
+    // 1. epic-scheduling bucket
+    // ---------------------------------------
     const loc_folders = ["Locations_Rooms", "Scheduling_Notes"];
-    for(const folder of loc_folders) {
-     const { data: locRooms, error: err1 } = await supabase.storage
-       .from("epic-scheduling")
-       .list(folder, { limit: 200 });
-     if (err1) console.error(err1);
-     else {
-       locRooms.forEach((f) =>
-         results.push({
-           name: f.name,
-           bucket: "epic-scheduling",
-           folder,
-           fullPath: `${folder}/${f.name}`,
-           url: supabase.storage
-             .from("epic-scheduling")
-             .getPublicUrl(`${folder}/${f.name}`).data.publicUrl,
-             type: folder === "Scheduling_Notes" ? "note" : "protocol"
-         })
-       );
-     }
-   }
-    // -------------------------
-   // 2. other-content bucket
-   // -------------------------
-   const folders = ["General_Tips", "Preps", "Other", "Other_Notes"];
+  
+    for (const folder of loc_folders) {
+      const { data: locRooms, error } = await supabase.storage
+        .from("epic-scheduling")
+        .list(folder, { limit: 200 });
+  
+      if (error) {
+        console.error(error);
+        continue;
+      }
+  
+      for (const f of locRooms) {
+        if (f.name === ".emptyFolderPlaceholder") continue;
+  
+        const fullPath = `${folder}/${f.name}`;
+        const url = supabase.storage
+          .from("epic-scheduling")
+          .getPublicUrl(fullPath).data.publicUrl;
+  
+        let category = null;
+  
+        // If it's a note, fetch JSON category
+        if (folder === "Scheduling_Notes") {
+          category = await fetchJsonCategory("epic-scheduling", fullPath);
+        }
+  
+        results.push({
+          name: f.name,
+          bucket: "epic-scheduling",
+          folder,
+          fullPath,
+          url,
+          type: folder === "Scheduling_Notes" ? "note" : "protocol",
+          category: folder === "Scheduling_Notes"
+            ? category   // pulled from JSON
+            : mapFolderToCategory(folder), // protocol category
+        });
+        
+      }
+    }
+  
+    // ---------------------------------------
+    // 2. other-content bucket
+    // ---------------------------------------
+    const folders = ["General_Tips", "Preps", "Other", "Other_Notes"];
+  
     for (const folder of folders) {
-     const { data, error } = await supabase.storage
-       .from("other-content")
-       .list(folder, { limit: 200 });
-      if (error) console.error(error);
-     else {
-       data.forEach((f) =>
-         results.push({
-           name: f.name,
-           bucket: "other-content",
-           folder,
-           fullPath: `${folder}/${f.name}`,
-           url: supabase.storage
-             .from("other-content")
-             .getPublicUrl(`${folder}/${f.name}`).data.publicUrl,
-             type: folder === "Other_Notes" ? "note" : "protocol"
-            
-         })
-       );
-     }
-   }
+      const { data, error } = await supabase.storage
+        .from("other-content")
+        .list(folder, { limit: 200 });
+  
+      if (error) {
+        console.error(error);
+        continue;
+      }
+  
+      for (const f of data) {
+        if (f.name === ".emptyFolderPlaceholder") continue;
+  
+        const fullPath = `${folder}/${f.name}`;
+        const url = supabase.storage
+          .from("other-content")
+          .getPublicUrl(fullPath).data.publicUrl;
+  
+        let category = null;
+  
+        // Fetch category from JSON note
+        if (folder === "Other_Notes") {
+          category = await fetchJsonCategory("other-content", fullPath);
+        }
+  
+        results.push({
+          name: f.name,
+          bucket: "other-content",
+          folder,
+          fullPath,
+          url,
+          type: folder === "Other_Notes" ? "note" : "protocol",
+          category: folder === "Other_Notes"
+            ? category   // JSON-based
+            : mapFolderToCategory(folder), // protocol category
+        });
+        
+      }
+    }
+  
     setFiles(results);
- };
+  };  
   // =========================================================
  // DELETE FILE
  // =========================================================
@@ -424,6 +498,22 @@ function AdminDashboard({ auth }) {
     transform: "scale(1.3)",
   };
 
+
+  const filteredFiles = files.filter((file) => {
+    // Filter by type
+    if (filterType !== "All" && file.type !== filterType.toLowerCase()) {
+      return false;
+    }
+  
+    // Filter by category
+    if (filterCategory !== "All" && file.category !== filterCategory) {
+      return false;
+    }
+  
+    return true;
+  });
+  
+
   return (
    <Box sx={{ bgcolor: "#F4F7FB", minHeight: "100vh" }}>
      {/* ================= NAVBAR (ALWAYS SHOWN) ================= */}
@@ -484,6 +574,7 @@ function AdminDashboard({ auth }) {
          </Box>
        </Toolbar>
      </AppBar>
+
 
 
      {/* ================= BODY AREA (CONDITIONAL) ================= */}
@@ -649,6 +740,21 @@ function AdminDashboard({ auth }) {
                    Add / Edit Policy Notes
                  </Typography>
 
+                 <FormControl fullWidth>
+                  <InputLabel>Note Category</InputLabel>
+                  <Select
+                    value={noteCategory}
+                    label="Note Category"
+                    onChange={(e) => setNoteCategory(e.target.value)}
+                  >
+                    <MenuItem value="Locations/Rooms">Locations / Rooms</MenuItem>
+                    <MenuItem value="General Tips">General Tips</MenuItem>
+                    <MenuItem value="Preps">Preps</MenuItem>
+                    <MenuItem value="Other">Other</MenuItem>
+                  </Select>
+                </FormControl>
+
+
 
                  <TextField
                    label="Title"
@@ -702,6 +808,55 @@ function AdminDashboard({ auth }) {
                    Uploaded Policies
                  </Typography>
 
+                
+                 <Box
+                  sx={{
+                    display: "flex",
+                    justifyContent: "center",
+                    gap: 4,
+                    mb: 3,
+                    mt: 1,
+                  }}
+                >
+                  {/* Filter Type */}
+                  <FormControl size="small" sx={{ minWidth: 180 }}>
+                    <InputLabel sx={{ fontSize: "14px" }}>Filter Type</InputLabel>
+                    <Select
+                      value={filterType}
+                      label="Filter Type"
+                      onChange={(e) => setFilterType(e.target.value)}
+                      sx={{
+                        borderRadius: 2,
+                        backgroundColor: "white",
+                      }}
+                    >
+                      <MenuItem value="All">All</MenuItem>
+                      <MenuItem value="Protocol">Protocol</MenuItem>
+                      <MenuItem value="Note">Note</MenuItem>
+                    </Select>
+                  </FormControl>
+
+                  {/* Filter Category */}
+                  <FormControl size="small" sx={{ minWidth: 200 }}>
+                    <InputLabel sx={{ fontSize: "14px" }}>Filter Category</InputLabel>
+                    <Select
+                      value={filterCategory}
+                      label="Filter Category"
+                      onChange={(e) => setFilterCategory(e.target.value)}
+                      sx={{
+                        borderRadius: 2,
+                        backgroundColor: "white",
+                      }}
+                    >
+                      <MenuItem value="All">All</MenuItem>
+                      <MenuItem value="Locations/Rooms">Locations/Rooms</MenuItem>
+                      <MenuItem value="General Tips">General Tips</MenuItem>
+                      <MenuItem value="Preps">Preps</MenuItem>
+                      <MenuItem value="Other">Other</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Box>
+
 
                  <TableContainer sx={{ flexGrow: 1, mt: 1 }}>
                    <Table size="small">
@@ -714,8 +869,8 @@ function AdminDashboard({ auth }) {
                        </TableRow>
                      </TableHead>
                      <TableBody>
-                       {files.length ? (
-                         files.map((file, idx) => (
+                       {filteredFiles.length ? (
+                         filteredFiles.map((file, idx) => (
                            <TableRow key={idx}>
                              <TableCell>
                                {file.name}
