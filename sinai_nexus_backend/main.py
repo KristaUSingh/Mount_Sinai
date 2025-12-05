@@ -174,12 +174,23 @@ class DeleteRequest(BaseModel):
 
 @app.post("/delete_file")
 async def delete_file(req: DeleteRequest):
-    target = req.file_path.strip().lstrip("/")
+    raw = req.file_path.strip()
 
+    # Example raw: "other-content/Other_Notes/UIDs_not_safe"
+    # Remove bucket → only keep folder + filename
+    if "/" in raw:
+        parts = raw.split("/", 1)   # remove only first slash group
+        target = parts[1]           # "Other_Notes/UIDs_not_safe"
+    else:
+        target = raw
+
+    print("Deleting rows with file_path starting with:", target)
+
+    # Use startswith (prefix) instead of ilike
     result = (
         supabase.table("documents")
         .delete()
-        .ilike("file_path", f"%{target}%")
+        .like("file_path", f"{target}%")
         .execute()
     )
 
