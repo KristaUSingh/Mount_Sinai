@@ -253,3 +253,7 @@ Question:
 @app.get("/")
 def home():
     return {"message": "Supabase RAG Backend (HF Inference) running!"}
+
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok"}
