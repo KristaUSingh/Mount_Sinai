@@ -27,6 +27,8 @@ supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 bucket = "epic-scheduling"
 path = "Locations_Rooms/new_scheduling_clean.parquet"
 
+
+
 # Download Parquet bytes
 res = supabase.storage.from_(bucket).download(path)
 
@@ -35,6 +37,25 @@ if not res:
 
 # Read Parquet directly into DataFrame: Loads the cleaned scheduling data
 df = pd.read_parquet(BytesIO(res))
+
+# -------------------------------------------------------------
+# Hard-coded abbreviation → full site mapping
+# Safe for deployment (no file dependencies)
+# -------------------------------------------------------------
+ABBREV_TO_SITE = {
+    "HESS": "1470 MADISON AVE RAD CT",
+    "RA": "1176 5TH AVE RAD CT",
+    "MSDUS": "10 UNION SQ E RAD CT",
+    "RA MORNINGSIDE": "1090 AMST AVE RAD CT",
+    "MSW": "425 W 59TH ST RAD CT",
+    "JB": "787 11TH AVE RAD CT",
+    "BC": "325 W 15TH ST RAD CT",
+    "MSQ OP": "MSQ OP RAD",
+    "BH": "300 CADMAN PLAZA RAD CT",
+    "MSM": "MSM RAD CT",
+    "MSB": "MSB RAD CT"
+}
+
 
 # Load prefix-to-department mapping
 with open("data/mapping.json") as f:

@@ -388,7 +388,10 @@ function AdminDashboard({ auth }) {
   
       for (const f of locRooms) {
         if (f.name === ".emptyFolderPlaceholder") continue;
-  
+        // Hide raw CSV scheduling files — only show Parquet
+        
+        if (f.name.toLowerCase().endsWith(".csv")) continue;
+
         const fullPath = `${folder}/${f.name}`;
         const url = supabase.storage
           .from("epic-scheduling")
