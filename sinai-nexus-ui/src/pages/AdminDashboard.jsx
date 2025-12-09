@@ -193,7 +193,7 @@ import {
   // -----------------------------
   const handleResetIndex = async () => {
     try {
-      const res = await fetch("http://localhost:8000/init_index", {
+      const res = await fetch("https://sinai-nexus-backend.onrender.com/init_index", {
         method: "POST",
       });
       const data = await res.json();
@@ -357,57 +357,43 @@ import {
  
  
   const handleDeleteSupabase = async (file) => {
-    if (!file || !file.bucket || !file.fullPath) {
-      console.error("Invalid file object for deletion:", file);
-      setAlert({
-        open: true,
-        msg: "Cannot delete: file info missing",
-        type: "error",
-      });
-      return;
-    }
+   if (!file) return;
+ 
+   const file_path = `${file.bucket}/${file.fullPath}`;
+ 
+   try {
+     // Delete from RAG DB
+     const res = await fetch("https://sinai-nexus-backend.onrender.com/delete_file", {
+       method: "POST",
+       headers: { "Content-Type": "application/json" },
+       body: JSON.stringify({ file_path }),
+     });
+ 
+     const data = await res.json();
+     console.log("delete_file DB result:", data);
+ 
+     // Delete from Supabase Storage
+     const { error } = await supabase.storage
+       .from(file.bucket)
+       .remove([file.fullPath]);
+ 
+     if (error) throw error;
+ 
+     // Remove from UI immediately
+     setFiles(prev =>
+       prev.filter(f =>
+         !(f.bucket === file.bucket && f.fullPath === file.fullPath)
+       )
+     );
+ 
+     setAlert({ open: true, msg: "File deleted!", type: "success" });
+   } catch (err) {
+     console.error("Deletion error:", err);
+     setAlert({ open: true, msg: "Error deleting file", type: "error" });
+   }
+ };
  
  
-    const fullPath_with_bucket = `${file.bucket}/${file.fullPath}`;
-     try {
-      if (file.bucket === "other-content") {
-      const res = await fetch("https://sinai-nexus-backend.onrender.com/delete_file", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        body: JSON.stringify({ file_path: fullPath_with_bucket }),
-      });
- 
- 
-      const data = await res.json();
- 
- 
-      console.log("🟦 delete_file response:", data);
-      console.log("🟦 Sent file_path:", fullPath_with_bucket);
- 
- 
-      if (data.count === 0) {
-        console.warn("⚠️ No rows deleted from documents table. Check file_path mismatch.");
-      }
-    }
- 
- 
-      const { error } = await supabase.storage
-        .from(file.bucket)
-        .remove([file.fullPath]);
-       if (error) throw error;
- 
- 
-      setAlert({ open: true, msg: "File deleted!", type: "success" });
-       // Refresh list after deleting
-      loadAllFiles();
-     } catch (err) {
-      console.error("Supabase deletion error:", err);
-      setAlert({ open: true, msg: "Error deleting file", type: "error" });
-    }
-  };
    const confirmDelete = () => {
     if (!fileToDelete) return;
     handleDeleteSupabase(fileToDelete);
