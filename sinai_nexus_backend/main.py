@@ -11,43 +11,38 @@ from dotenv import load_dotenv
 
 from unstructured.partition.auto import partition
 from uuid import uuid4
-
-from huggingface_hub import InferenceClient    # NEW
+from huggingface_hub import InferenceClient            # ✅ ADDED
 
 from supabase import create_client
 from src.query_router import answer_scheduling_query
 
 
-# ============================================================
+# ------------------------------
 # ENV + Supabase Client
-# ============================================================
+# ------------------------------
 load_dotenv()
 url = os.getenv("SUPABASE_URL")
 key = os.getenv("SUPABASE_SERVICE_KEY")
 supabase = create_client(url, key)
 
-HF_TOKEN = os.getenv("HF_TOKEN")
-hf_client = InferenceClient(provider="hf-inference", api_key=HF_TOKEN)
+HF_TOKEN = os.getenv("HF_TOKEN")   # ✅ ADDED
+hf_client = InferenceClient(provider="hf-inference", api_key=HF_TOKEN)  # ✅ ADDED
 
-# ============================================================
-# Gemini Config
-# ============================================================
+
+# ------------------------------
+# Gemini Setup
+# ------------------------------
 if os.getenv("GOOGLE_API_KEY"):
-    genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+   genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 else:
-    genai.configure()
+   genai.configure()
 
 
-# ============================================================
-# Embedding API Wrapper
-# ============================================================
+# ------------------------------
+# HuggingFace Embedding Wrapper
+# ------------------------------
 def embed_text_list(text_list):
-    """
-    Uses HuggingFace Inference API to embed a list of text chunks.
-    Returns a list of embedding vectors.
-    """
-
-    # API expects similarity-like call — the trick is we do 1-by-1
+    """Return embeddings from HuggingFace Inference API."""
     embeddings = []
     for chunk in text_list:
         try:
@@ -58,27 +53,24 @@ def embed_text_list(text_list):
             embeddings.append(out)
         except Exception as e:
             print("Embedding error:", e)
-            embeddings.append([0.0] * 384)  # fallback vector
-
+            embeddings.append([0.0] * 384)  # fallback
     return embeddings
 
 
-# ============================================================
-# FASTAPI APP
-# ============================================================
+# ------------------------------
+# FastAPI App
+# ------------------------------
 app = FastAPI(title="Sinai Nexus Backend (Supabase RAG)")
-
 app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+   CORSMiddleware,
+   allow_origins=["*"],
+   allow_credentials=True,
+   allow_methods=["*"],
+   allow_headers=["*"],
 )
 
-
 class AgentChatRequest(BaseModel):
-    question: str
+   question: str
 
 
 # ============================================================
@@ -86,6 +78,7 @@ class AgentChatRequest(BaseModel):
 # ============================================================
 @app.post("/agent-chat")
 def agent_chat(payload: AgentChatRequest):
+    """Deterministic scheduling Q&A"""
     try:
         answer = answer_scheduling_query(payload.question)
         return {"answer": answer}
@@ -98,19 +91,21 @@ def agent_chat(payload: AgentChatRequest):
 # ============================================================
 @app.post("/upload")
 async def upload_file(
-    file: UploadFile = File(...),
-    priority: int = Form(3),
-    path: str = Form(...)
+   file: UploadFile = File(...),
+   priority: int = Form(3),
+   path: str = Form(...)
 ):
-    os.makedirs("uploads", exist_ok=True)
+    """
+    Upload → Parse → Chunk → Embed → Insert into Supabase.
+    """
 
+    os.makedirs("uploads", exist_ok=True)
     local_path = f"uploads/{uuid4()}_{file.filename}"
 
-    # Save temp file
     with open(local_path, "wb") as f:
         f.write(await file.read())
 
-    # Handle JSON notes
+    # JSON notes
     if file.content_type == "application/json":
         priority = 1
         with open(local_path, "r") as f:
@@ -119,7 +114,7 @@ async def upload_file(
         chunks = [text] if text else []
 
     else:
-        # Parse PDF manually (more reliable)
+        # PDF
         if file.filename.lower().endswith(".pdf"):
             elements = []
             with pdfplumber.open(local_path) as pdf:
@@ -130,27 +125,26 @@ async def upload_file(
             text = "\n".join(elements)
 
         else:
-            # fallback for docx, txt, md, etc.
             elements = partition(filename=local_path, strategy="text")
             text = "\n".join([el.text for el in elements if el.text])
 
-        # Chunking
         chunk_size = 600
         overlap = 80
         chunks = [
-            text[i:i + chunk_size]
+            text[i : i + chunk_size]
             for i in range(0, len(text), chunk_size - overlap)
         ]
 
-    # EMBEDDINGS USING HF API (NEW)
+    # -------------------------------
+    # ✅ USE HF INFERENCE FOR EMBEDDING
+    # -------------------------------
     embeddings = embed_text_list(chunks)
 
-    # Store in DB
     rows = []
     for chunk, emb in zip(chunks, embeddings):
         rows.append({
             "content": chunk,
-            "embedding": emb,
+            "embedding": emb,   # HF returns a usable list
             "priority": priority,
             "file_path": path
         })
@@ -159,7 +153,7 @@ async def upload_file(
         supabase.table("documents").insert(rows).execute()
 
     return {
-        "message": f"Inserted {len(chunks)} chunks",
+        "message": f"Inserted {len(chunks)} chunks into Supabase",
         "chunks_added": len(chunks),
         "stored_path": path
     }
@@ -169,46 +163,21 @@ async def upload_file(
 # 3️⃣ DELETE FILE
 # ============================================================
 class DeleteRequest(BaseModel):
-    file_path: str
-
+   file_path: str
 
 @app.post("/delete_file")
 async def delete_file(req: DeleteRequest):
-    raw = req.file_path.strip()
-
-    if "/" in raw:
-        _, target = raw.split("/", 1)
-    else:
-        target = raw
-
-    print("Normalized delete target:", target)
-
-    # STEP 1: Select all rows with matching prefix
-    query = (
-        supabase.table("documents")
-        .select("id, file_path")
-        .like("file_path", f"{target}%")
-        .execute()
-    )
-
-    rows = query.data or []
-
-    if not rows:
-        return {"message": "No rows to delete", "deleted": []}
-
-    ids = [r["id"] for r in rows]
-
-    # STEP 2: Delete using IN clause
-    delete_res = (
+    response = (
         supabase.table("documents")
         .delete()
-        .in_("id", ids)
+        .eq("file_path", req.file_path)
         .execute()
     )
 
     return {
-        "message": f"Deleted {len(delete_res.data)} rows",
-        "deleted": delete_res.data
+        "message": f"Deleted {len(response.data)} chunks",
+        "file_path_received": req.file_path,
+        "deleted_rows": response.data,
     }
 
 
@@ -218,44 +187,47 @@ async def delete_file(req: DeleteRequest):
 @app.post("/rag-chat")
 async def rag_chat(query: str = Form(...)):
 
-    # QUERY EMBEDDING (API instead of local model!)
-    q_emb = embed_text_list([query])[0]
+    # -------------------------------
+    # ✅ HF Inference embed for query
+    # -------------------------------
+    q_embed = embed_text_list([query])[0]
 
-    # 1 — Search Supabase
     result = supabase.rpc(
         "match_documents",
         {
-            "query_embedding": q_emb,
+            "query_embedding": q_embed,
             "match_count": 20
         }
     ).execute()
 
     items = result.data or []
 
-    # 2 — Priority scoring
-    ranked = []
+    scored = []
     for row in items:
         dist = row.get("distance", 1.0)
         pr = row.get("priority", 3)
-        score = dist * (1 + (pr - 1) * 0.5)
-        ranked.append((score, row))
+        score = dist * (1.0 + (pr - 1) * 0.5)
+        scored.append((score, row))
 
-    ranked.sort(key=lambda x: x[0])
+    scored.sort(key=lambda x: x[0])
 
-    notes = [row for score, row in ranked if row["priority"] == 1][:3]
-    docs  = [row for score, row in ranked if row["priority"] > 1][:4]
+    notes = [row for score, row in scored if row["priority"] == 1][:3]
+    docs  = [row for score, row in scored if row["priority"] > 1][:4]
 
     top_chunks = [r["content"] for r in notes] + [r["content"] for r in docs]
     context = "\n\n".join(top_chunks)
 
-    # literal shortcut
     if query.lower() in context.lower():
         return {"answer": context}
 
-    # Gemini generation
     prompt = f"""
 You are a Mount Sinai Radiology assistant.
-Plain text only. No markdown.
+Give ALL answers in plain text. No markdown. No asterisks.
+
+Use the provided text below when answering.
+Notes (priority 1) always override older or conflicting information from documents.
+However, still include all other correct non-conflicting information from the documents.
+If the document does not contain the answer, say I am unsure.
 
 Context:
 {context}
@@ -271,12 +243,12 @@ Question:
 
 
 # ============================================================
-# 5️⃣ HEALTH
+# HEALTH
 # ============================================================
 @app.get("/")
 def home():
-    return {"message": "Supabase RAG Backend (HF Inference) running!"}
+    return {"message": "Supabase RAG Backend is running!"}
 
 @app.get("/healthz")
-def healthz():
+def health():
     return {"status": "ok"}
