@@ -134,7 +134,7 @@ import {
   //FIX ME: NEED EXAMS_CLEANUP ENDPOINT
   if (fileType === "Locations/Rooms") {
       // Call exams_cleanup for Locations/Rooms
-      await fetch("http://127.0.0.1:8000/exams_cleanup", {
+      await fetch("https://sinai-nexus-backend.onrender.com/exams_cleanup", {
         method: "POST",
         body: JSON.stringify({ file_path: fullPath }),
         headers: { "Content-Type": "application/json", "Accept": "application/json" },
@@ -148,7 +148,7 @@ import {
       formData.append("path", fullPath);       //Path for file
  
  
-      await fetch("http://127.0.0.1:8000/upload", {
+      await fetch("https://sinai-nexus-backend.onrender.com/upload", {
         method: "POST",
         body: formData,                        // multipart/form-data
       });
@@ -193,7 +193,7 @@ import {
   // -----------------------------
   const handleResetIndex = async () => {
     try {
-      const res = await fetch("http://127.0.0.1:8000/init_index", {
+      const res = await fetch("https://sinai-nexus-backend.onrender.com/init_index", {
         method: "POST",
       });
       const data = await res.json();
@@ -254,7 +254,7 @@ import {
           formData.append("path",`${bucket}/${filePath}`);
  
  
-          await fetch("http://127.0.0.1:8000/upload", {
+          await fetch("https://sinai-nexus-backend.onrender.com/upload", {
             method: "POST",
             body: formData,
           });
@@ -363,7 +363,7 @@ import {
  
    try {
      // Delete from RAG DB
-     const res = await fetch("http://127.0.0.1:8000/delete_file", {
+     const res = await fetch("https://sinai-nexus-backend.onrender.com/delete_file", {
        method: "POST",
        headers: { "Content-Type": "application/json" },
        body: JSON.stringify({ file_path }),

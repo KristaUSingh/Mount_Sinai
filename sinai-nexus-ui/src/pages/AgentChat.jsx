@@ -161,8 +161,8 @@ function AgentChat({ auth, hideNavbar = false }) {
     try {
       const endpoint =
         activeMode === "schedule"
-          ? "http://127.0.0.1:8000/agent-chat"
-          : "http://127.0.0.1:8000/rag-chat";
+          ? "https://sinai-nexus-backend.onrender.com/agent-chat"
+          : "https://sinai-nexus-backend.onrender.com/rag-chat";
 
       const body =
         activeMode === "schedule"
