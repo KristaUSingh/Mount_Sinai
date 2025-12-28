@@ -71,3 +71,31 @@ for prefix in LOCATION_PREFIXES.keys():
         print(f"⚠️ Warning: location prefix '{prefix}' matched no departments")
 
     LOCATION_TO_DEPARTMENTS[prefix] = deps
+
+# -------------------------------------------------------------
+# Room prefix → location prefix mapping
+# -------------------------------------------------------------
+# Example: "HESS" -> "1470 MADISON AVE", "RA" -> "1176 5TH AVE"
+# We infer it from the dataset so no hardcoding is needed.
+
+def _build_room_prefix_to_location(df: pd.DataFrame, location_prefixes: dict) -> dict:
+    mapping = {}
+    if "Room Name" not in df.columns or "DEP Name" not in df.columns:
+        return mapping
+
+    for loc_prefix in location_prefixes.keys():
+        subset = df[df["DEP Name"].astype(str).str.startswith(loc_prefix)]
+        rooms = subset["Room Name"].dropna().astype(str)
+
+        # room prefix = first token (e.g., "HESS CT ROOM 6" -> "HESS")
+        first_tokens = rooms.str.split().str[0].dropna()
+        if first_tokens.empty:
+            continue
+
+        # take most common prefixes for this location
+        for token in first_tokens.value_counts().head(15).index.tolist():
+            mapping.setdefault(token, loc_prefix)
+
+    return mapping
+
+ROOM_PREFIX_TO_LOCATION = _build_room_prefix_to_location(df, LOCATION_PREFIXES)
