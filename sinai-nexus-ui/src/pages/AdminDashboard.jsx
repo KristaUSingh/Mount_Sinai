@@ -80,6 +80,8 @@ function AdminDashboard({ auth }) {
   const [noteContent, setNoteContent] = useState("");
   const [noteCategory, setNoteCategory] = useState("");
   const [noteLocation, setNoteLocation] = useState(""); // location prefix string
+  const [noteStartDate, setNoteStartDate] = useState(""); // "YYYY-MM-DD"
+  const [noteEndDate, setNoteEndDate] = useState("");     // "YYYY-MM-DD"
 
 
   const [fileType, setFileType] = useState("");
@@ -230,6 +232,10 @@ function AdminDashboard({ auth }) {
   // -----------------------------
   // Add text note with CATEGORY SUPPORT
   // -----------------------------
+
+  const toStartISO = (d) => (d ? `${d}T00:00:00Z` : null);
+  const toEndISO = (d) => (d ? `${d}T23:59:59Z` : null); // inclusive end-of-day
+
   const handleAddPolicy = async () => {
     if (!noteTitle.trim() || !noteContent.trim() || !noteCategory) return;
     // If Scheduling + location note, require location selection
@@ -241,6 +247,8 @@ function AdminDashboard({ auth }) {
       category: noteCategory,
       location: noteCategory === "Scheduling" ? noteLocation : null,
       created_at: new Date().toISOString(),
+      start_date: noteStartDate ? toStartISO(noteStartDate) : null,
+      end_date: noteEndDate ? toEndISO(noteEndDate) : null,    
     };
 
     const blob = new Blob([JSON.stringify(noteData, null, 2)], {
@@ -307,6 +315,9 @@ function AdminDashboard({ auth }) {
         if (noteCategory === "Scheduling") {
           formData.append("location", noteLocation);
         }
+        if (noteStartDate) formData.append("start_date", toStartISO(noteStartDate));
+        if (noteEndDate) formData.append("end_date", toEndISO(noteEndDate));
+
 
         await fetch("http://127.0.0.1:8000/upload", {
           method: "POST",
@@ -335,6 +346,8 @@ function AdminDashboard({ auth }) {
       setNoteContent("");
       setNoteCategory("");
       setNoteLocation("");
+      setNoteStartDate("");
+      setNoteEndDate("");
 
       // Reload lists
       loadAllFiles();
@@ -624,7 +637,7 @@ function AdminDashboard({ auth }) {
                         borderRadius: 3,
                         overflow: "hidden",
                         background: "white",
-                        height: 360, // adjust if you want slightly taller/shorter
+                        height: 480, // adjust if you want slightly taller/shorter
                         width: 650,
                         display: "flex",
                         flexDirection: "column",
@@ -756,7 +769,7 @@ function AdminDashboard({ auth }) {
                         borderRadius: 3,
                         overflow: "hidden",
                         background: "white",
-                        height: 360,
+                        height: 480,
                         width: 650,
                         display: "flex",
                         flexDirection: "column",
@@ -829,6 +842,26 @@ function AdminDashboard({ auth }) {
                             </Select>
                           </FormControl>
                         )}
+
+                        <TextField
+                          size="small"
+                          label="Effective Start Date (optional)"
+                          type="date"
+                          fullWidth
+                          value={noteStartDate}
+                          onChange={(e) => setNoteStartDate(e.target.value)}
+                          InputLabelProps={{ shrink: true }}
+                        />
+
+                        <TextField
+                          size="small"
+                          label="Effective End Date (optional)"
+                          type="date"
+                          fullWidth
+                          value={noteEndDate}
+                          onChange={(e) => setNoteEndDate(e.target.value)}
+                          InputLabelProps={{ shrink: true }}
+                        />
 
                         <TextField
                           size="small"
