@@ -9,6 +9,10 @@
 from typing import Optional
 from difflib import get_close_matches
 
+# ✅ ADDED
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from src.query_interpreter import interpret_scheduling_query
 from src.query_handlers import (
     exam_at_site,
@@ -50,6 +54,49 @@ CONFIRMATION_FOOTER = (
 
 
 # -------------------------------
+# ✅ ADDED: Effective-date helpers (NY time)
+# -------------------------------
+
+def today_ny_str() -> str:
+    """Return today's date in America/New_York as YYYY-MM-DD."""
+    return datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+
+
+def add_effective_range_filters(q, today: str):
+    """
+    Apply:
+      - (start_date IS NULL OR start_date <= today)
+      - (end_date IS NULL OR end_date >= today)
+
+    Works for notes only, but safe for docs too since docs will have NULL dates.
+    """
+    q = q.or_(f"start_date.is.null,start_date.lte.{today}")
+    q = q.or_(f"end_date.is.null,end_date.gte.{today}")
+    return q
+
+
+def purge_expired_notes(supabase, today: str):
+    """
+    Auto-delete expired notes (end_date < today) from Supabase.
+    NOTE: This runs opportunistically when notes are fetched.
+    """
+    if not supabase:
+        return
+
+    try:
+        (
+            supabase
+            .table("documents")
+            .delete()
+            .ilike("file_path", "%Scheduling_Notes%")
+            .lt("end_date", today)
+            .execute()
+        )
+    except Exception as e:
+        print("purge_expired_notes error:", e)
+
+
+# -------------------------------
 # Location Notes (Supabase-only)
 # -------------------------------
 
@@ -64,15 +111,23 @@ def get_location_notes_from_db(supabase, location: str):
         return []
 
     try:
-        res = (
+        today = today_ny_str()
+
+        # ✅ ADDED: auto-delete expired notes first
+        purge_expired_notes(supabase, today)
+
+        q = (
             supabase
             .table("documents")
-            .select("content,file_path,location")
+            .select("content,file_path,location,start_date,end_date")  # ✅ ADDED fields
             .eq("location", location)
             .ilike("file_path", "%Scheduling_Notes%")
-            .execute()
         )
 
+        # ✅ ADDED: only active notes should show up
+        q = add_effective_range_filters(q, today)
+
+        res = q.execute()
         data = res.data or []
 
         # De-dupe notes by file_path (since multiple chunks could exist)
@@ -123,11 +178,7 @@ def format_location_notes(location: str, supabase=None):
 
 
 # Helper functions to return official site and exam names
-# Only exam name
 def format_exam_header(exam, content):
-    """
-    Prepend the official exam name to the answer content.
-    """
     return (
         f"Official exam name: {exam}\n\n"
         f"{content.strip()}\n\n"
@@ -135,11 +186,7 @@ def format_exam_header(exam, content):
     )
 
 
-# Exam and site name
 def format_site_exam_header(site, exam, content, supabase=None):
-    """
-    Prepend the official site and exam names to the answer.
-    """
     notes_block = format_location_notes(site, supabase)
 
     return (
@@ -151,11 +198,7 @@ def format_site_exam_header(site, exam, content, supabase=None):
     )
 
 
-# Only site name
 def format_site_header(site, content, supabase=None):
-    """
-    Prepend the official site name to the answer content.
-    """
     notes_block = format_location_notes(site, supabase)
 
     return (
@@ -167,17 +210,6 @@ def format_site_header(site, content, supabase=None):
 
 
 def answer_scheduling_query(user_input: str, supabase=None):
-    """
-    Purpose:
-        Handle any scheduling-related user question by:
-          1. Sending it to Gemini for interpretation
-          2. Routing it to the correct lookup function
-          3. Returning a clear, human-readable answer
-
-    NOTE:
-      - Pass supabase if you want Supabase-based location notes to appear in responses.
-      - If supabase is None, the system works the same, just without notes.
-    """
     parsed = interpret_scheduling_query(user_input)
     intent = parsed.get("intent")
     exam = parsed.get("exam")
@@ -187,7 +219,6 @@ def answer_scheduling_query(user_input: str, supabase=None):
     print(parsed)
     print("------------------------------\n")
 
-    # Intent 1: "Is [exam] done at [site]?"
     if intent == "exam_at_site" and exam and site:
         found, official_exam, official_site = exam_at_site(exam, site)
 
@@ -204,7 +235,6 @@ def answer_scheduling_query(user_input: str, supabase=None):
 
         return format_site_exam_header(official_site, official_exam, content, supabase)
 
-    # Intent 2: "Which locations perform [exam]?"
     elif intent == "locations_for_exam" and exam:
         locs, official_exam = locations_for_exam(exam)
 
@@ -216,7 +246,6 @@ def answer_scheduling_query(user_input: str, supabase=None):
         content = "Performed at:\n" + "\n".join(locs)
         return format_exam_header(official_exam, content)
 
-    # Intent 3: "What exams are offered at [site]?"
     elif intent == "exams_at_site" and site:
         exams, official_site = exams_at_site(site)
 
@@ -228,7 +257,6 @@ def answer_scheduling_query(user_input: str, supabase=None):
         content = "Exams offered:\n" + "\n".join(exams)
         return format_site_header(official_site, content, supabase)
 
-    # Intent 4: "How long does [exam] take?"
     elif intent == "exam_duration" and exam:
         duration, official_exam = exam_duration(exam)
 
@@ -240,7 +268,6 @@ def answer_scheduling_query(user_input: str, supabase=None):
         content = f"Duration: {duration} minutes"
         return format_exam_header(official_exam, content)
 
-    # Intent 5: "Which rooms at [site] perform [exam]?"
     elif intent == "rooms_for_exam_at_site" and exam and site:
         rooms, official_exam, official_site = rooms_for_exam_at_site(exam, site)
 
@@ -254,7 +281,6 @@ def answer_scheduling_query(user_input: str, supabase=None):
         content = "Rooms:\n" + "\n".join(rooms)
         return format_site_exam_header(official_site, official_exam, content, supabase)
 
-    # Intent 6: "Which rooms perform [exam]?"
     elif intent == "rooms_for_exam" and exam:
         rooms, official_exam = rooms_for_exam(exam)
 

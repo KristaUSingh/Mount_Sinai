@@ -7,6 +7,8 @@ import json
 import numpy as np
 import requests
 import google.generativeai as genai
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -130,7 +132,14 @@ def agent_chat(payload: AgentChatRequest):
 # 2️⃣ Upload → Parse → Chunk → Embed → Insert into Supabase
 # ===============================================================
 @app.post("/upload")
-async def upload_file(file: UploadFile, priority: int = Form(3), path: str = Form(None), location: Optional[str] = Form(None),):
+async def upload_file(
+    file: UploadFile,
+    priority: int = Form(3),
+    path: str = Form(None),
+    location: Optional[str] = Form(None),
+    start_date: Optional[str] = Form(None),
+    end_date: Optional[str] = Form(None), 
+):
     """
     Upload a document or JSON note, chunk it, embed it, store it in Supabase.
     priority = 1 (highest), 2, or 3 (lowest, default)
@@ -148,7 +157,9 @@ async def upload_file(file: UploadFile, priority: int = Form(3), path: str = For
     storage_path = path if path else f"other-content/{file.filename}"
 
     # Determine if JSON note
-    if file.filename.lower().endswith(".json"):
+    is_note = file.filename.lower().endswith(".json")
+
+    if is_note:
         # Automatic priority 1 for notes
         priority = 1
         with open(local_path, "r") as f:
@@ -187,6 +198,13 @@ async def upload_file(file: UploadFile, priority: int = Form(3), path: str = For
         if location:
             row["location"] = location
 
+        # ✅ Added: effective date range (ONLY for notes)
+        if is_note:
+            if start_date:
+                row["start_date"] = start_date
+            if end_date:
+                row["end_date"] = end_date
+
         rows.append(row)
 
     if rows:
@@ -196,6 +214,7 @@ async def upload_file(file: UploadFile, priority: int = Form(3), path: str = For
         "message": f"Inserted {len(chunks)} chunks into Supabase",
         "chunks_added": len(chunks)
     }
+
 
 # ===============================================================
 # 3️⃣ Delete File Endpoint
@@ -220,6 +239,27 @@ async def delete_file(request: DeleteFileRequest):
         "count": deleted_count
     }
 
+
+
+# ADDED helpers for notes filtering 
+def today_ny_str() -> str:
+    return datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+
+def is_note_active(row: dict, today: str) -> bool:
+    """
+    Notes only: active if (start_date is null OR start_date <= today)
+                 AND (end_date is null OR end_date >= today)
+    Works with YYYY-MM-DD strings.
+    """
+    sd = row.get("start_date")
+    ed = row.get("end_date")
+
+    if sd and sd > today:
+        return False
+    if ed and ed < today:
+        return False
+    return True
+
 # ===============================================================
 # 4️⃣ RAG Chat (Optimized Notes + Chunks Context)
 # ===============================================================
@@ -227,6 +267,20 @@ async def delete_file(request: DeleteFileRequest):
 async def rag_chat(query: str = Form(...)):
     # Embed query (HF Inference API)
     q_embed = hf_embed([query]).tolist()[0]
+
+    # ✅ ADDED: auto-delete expired notes (opportunistic)
+    today = today_ny_str()
+    try:
+        (
+            supabase.table("documents")
+            .delete()
+            .eq("priority", 1)
+            .ilike("file_path", "%.json")   # notes are JSON
+            .lt("end_date", today)          # expired
+            .execute()
+        )
+    except Exception as e:
+        print("purge expired notes error:", e)
 
     # 1. Search Supabase
     result = supabase.rpc(
@@ -238,6 +292,15 @@ async def rag_chat(query: str = Form(...)):
     ).execute()
 
     items = result.data or []
+
+    # ✅ ADDED: filter OUT inactive notes (only affects priority 1)
+    filtered = []
+    for row in items:
+        if row.get("priority") == 1:
+            if not is_note_active(row, today):
+                continue
+        filtered.append(row)
+    items = filtered
 
     # 2. Priority scoring (notes = priority 1 → strongest weight)
     scored = []
