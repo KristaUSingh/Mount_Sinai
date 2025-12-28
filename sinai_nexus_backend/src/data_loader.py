@@ -17,8 +17,6 @@ import os
 from io import BytesIO
 from dotenv import load_dotenv
 from data.location_prefixes import LOCATION_PREFIXES
-# Load prefix-to-department mapping
-from data.room_location_map import ROOM_PREFIX_TO_LOCATION
 
 load_dotenv()  
 
