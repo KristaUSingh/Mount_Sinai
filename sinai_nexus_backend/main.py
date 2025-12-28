@@ -105,17 +105,23 @@ def hf_embed(texts, normalize: bool = EMBED_NORMALIZE) -> np.ndarray:
 # ------------------------------
 app = FastAPI(title="Sinai Nexus Backend (Supabase RAG)")
 
-# Add CORS middleware
+from fastapi.middleware.cors import CORSMiddleware
+
+origins = [
+    "https://sinainexus.vercel.app",
+    "https://www.sinainexus.vercel.app",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
-    allow_credentials=True,
+    allow_origins=origins,
+    allow_credentials=True,   # keep true ONLY if you actually use cookies/auth sessions
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 
 class ExamsCleanupRequest(BaseModel):
