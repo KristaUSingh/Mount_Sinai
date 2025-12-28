@@ -24,6 +24,28 @@ from unstructured.partition.auto import partition
 from supabase import create_client
 
 # ------------------------------
+# FastAPI App FIRST
+# ------------------------------
+app = FastAPI(title="Sinai Nexus Backend (Supabase RAG)")
+
+ALLOWED_ORIGINS = [
+    "https://sinainexus.vercel.app",
+    "https://www.sinainexus.vercel.app",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=86400,
+)
+
+# ------------------------------
 # ENV + Supabase Client
 # ------------------------------
 load_dotenv()
@@ -103,26 +125,6 @@ def hf_embed(texts, normalize: bool = EMBED_NORMALIZE) -> np.ndarray:
 # ------------------------------
 # FastAPI App
 # ------------------------------
-app = FastAPI(title="Sinai Nexus Backend (Supabase RAG)")
-
-from fastapi.middleware.cors import CORSMiddleware
-
-origins = [
-    "https://sinainexus.vercel.app",
-    "https://www.sinainexus.vercel.app",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,   # keep true ONLY if you actually use cookies/auth sessions
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
 
 class ExamsCleanupRequest(BaseModel):
     file_path: str  # "epic-scheduling/Locations_Rooms/<file>.csv"
