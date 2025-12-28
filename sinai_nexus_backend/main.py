@@ -69,42 +69,57 @@ else:
 # ===============================================================
 # ✅ Hugging Face Inference API Embeddings (384-d vectors)
 # ===============================================================
-from huggingface_hub import InferenceClient
-
-# At top of file with other initializations
 HF_TOKEN = os.getenv("HF_TOKEN")
-hf_client = InferenceClient(provider="hf-inference", api_key=HF_TOKEN)
+HF_URL = os.getenv(
+    "HF_FEATURE_URL",
+    "https://router.huggingface.co/hf-inference/models/sentence-transformers/all-MiniLM-L6-v2/pipeline/feature-extraction",
+)
+EMBED_NORMALIZE = os.getenv("EMBEDDINGS_NORMALIZE", "true").lower() == "true"
 
-def hf_embed(texts, normalize: bool = True) -> np.ndarray:
+_session = requests.Session()
+
+def hf_embed(texts, normalize: bool = EMBED_NORMALIZE) -> np.ndarray:
     """
-    Returns np.ndarray of shape (batch, 384) using HF InferenceClient
+    Returns np.ndarray of shape (batch, 384)
+    HF returns:
+      - single vector if inputs is a string
+      - list of vectors if inputs is a list of strings
+    We normalize both cases into (batch, dim).
     """
+    if not HF_TOKEN:
+        raise RuntimeError("HF_TOKEN is missing in environment variables.")
+
     if isinstance(texts, str):
         texts = [texts]
-    
+
+    # Filter empty strings
     texts = [t for t in texts if isinstance(t, str) and t.strip()]
     if not texts:
         return np.zeros((0, 384), dtype=np.float32)
-    
-    embeddings = []
-    for chunk in texts:
-        try:
-            out = hf_client.feature_extraction(
-                inputs=chunk,
-                model="sentence-transformers/all-MiniLM-L6-v2"
-            )
-            embeddings.append(out)
-        except Exception as e:
-            print(f"Embedding error: {e}")
-            embeddings.append([0.0] * 384)  # fallback
-    
-    vecs = np.array(embeddings, dtype=np.float32)
-    
+
+    headers = {
+        "Authorization": f"Bearer {HF_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+    r = _session.post(HF_URL, headers=headers, json={"inputs": texts}, timeout=60)
+    r.raise_for_status()
+    data = r.json()
+
+    # If HF returns a single vector (list of floats), wrap it into [vector]
+    if isinstance(data, list) and data and isinstance(data[0], (int, float)):
+        data = [data]
+
+    vecs = np.array(data, dtype=np.float32)
+
+    if vecs.ndim != 2:
+        raise RuntimeError(f"Unexpected HF embedding shape: {vecs.shape}")
+
     if normalize:
         norms = np.linalg.norm(vecs, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
         vecs = vecs / norms
-    
+
     return vecs
 
 # ------------------------------
