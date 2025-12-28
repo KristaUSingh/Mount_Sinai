@@ -56,6 +56,21 @@ const Transition = forwardRef(function Transition(props, ref) {
   return <Slide direction="up" ref={ref} {...props} />;
 });
 
+const LOCATION_OPTIONS = [
+  "10 UNION SQ E",
+  "1090 AMST AVE",
+  "1176 5TH AVE",
+  "1470 MADISON AVE",
+  "425 W 59TH ST",
+  "787 11TH AVE",
+  "325 W 15TH ST",
+  "MSQ OP RAD",
+  "300 CADMAN PLAZA",
+  "MSM",
+  "MSB",
+];
+
+
 function AdminDashboard({ auth }) {
   const navigate = useNavigate();
 
@@ -64,6 +79,8 @@ function AdminDashboard({ auth }) {
   const [noteTitle, setNoteTitle] = useState("");
   const [noteContent, setNoteContent] = useState("");
   const [noteCategory, setNoteCategory] = useState("");
+  const [noteLocation, setNoteLocation] = useState(""); // location prefix string
+
 
   const [fileType, setFileType] = useState("");
   const [fileExtension, setFileExtension] = useState("");
@@ -215,11 +232,14 @@ function AdminDashboard({ auth }) {
   // -----------------------------
   const handleAddPolicy = async () => {
     if (!noteTitle.trim() || !noteContent.trim() || !noteCategory) return;
+    // If Scheduling + location note, require location selection
+    if (noteCategory === "Scheduling" && !noteLocation) return;
 
     const noteData = {
       title: noteTitle.trim(),
       content: noteContent.trim(),
       category: noteCategory,
+      location: noteCategory === "Scheduling" ? noteLocation : null,
       created_at: new Date().toISOString(),
     };
 
@@ -229,7 +249,14 @@ function AdminDashboard({ auth }) {
 
     // Sanitize filename and add .json extension
     const sanitizedTitle = noteTitle.trim().replace(/[^a-zA-Z0-9_-]/g, "_");
-    const fileName = `${sanitizedTitle}.json`;
+    const safeLoc =
+      noteCategory === "Scheduling" && noteLocation
+        ? noteLocation.replace(/[^a-zA-Z0-9_-]/g, "_")
+        : null;
+
+    const fileName = safeLoc
+      ? `LOC_${safeLoc}__${sanitizedTitle}.json`
+      : `${sanitizedTitle}.json`;
 
     // Map category to folder structure
     const categoryFolderMap = {
@@ -241,13 +268,12 @@ function AdminDashboard({ auth }) {
 
     const targetFolder = categoryFolderMap[noteCategory];
 
-    // Upload to other-content bucket by default
-    const uploads = [{ bucket: "other-content", folder: targetFolder }];
 
-    // If Scheduling category, also upload to epic-scheduling bucket
-    if (noteCategory === "Scheduling") {
-      uploads.push({ bucket: "epic-scheduling", folder: "Scheduling_Notes" });
-    }
+    // Upload to other-content bucket by default
+    const uploads =
+      noteCategory === "Scheduling"
+        ? [{ bucket: "epic-scheduling", folder: "Scheduling_Notes" }]
+        : [{ bucket: "other-content", folder: targetFolder }];
 
     try {
       let publicUrl = null;
@@ -278,6 +304,9 @@ function AdminDashboard({ auth }) {
         formData.append("file", file);
         formData.append("priority", "1");
         formData.append("path", `${bucket}/${filePath}`);
+        if (noteCategory === "Scheduling") {
+          formData.append("location", noteLocation);
+        }
 
         await fetch("http://127.0.0.1:8000/upload", {
           method: "POST",
@@ -305,6 +334,7 @@ function AdminDashboard({ auth }) {
       setNoteTitle("");
       setNoteContent("");
       setNoteCategory("");
+      setNoteLocation("");
 
       // Reload lists
       loadAllFiles();
@@ -429,28 +459,6 @@ function AdminDashboard({ auth }) {
         .remove([file.fullPath]);
 
       if (error) throw error;
-
-      // If it's a note that was uploaded to both buckets, delete from the other bucket too
-      if (file.type === "note" && file.category === "Scheduling") {
-        const otherBucket =
-          file.bucket === "epic-scheduling" ? "other-content" : "epic-scheduling";
-        const otherFolder = "Scheduling_Notes";
-        const otherPath = `${otherFolder}/${file.name}`;
-        const otherFullPath = `${otherBucket}/${otherPath}`;
-
-        // Also delete embeddings for the other bucket path
-        await fetch("http://127.0.0.1:8000/delete-file", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          body: JSON.stringify({ file_path: otherFullPath }),
-        });
-
-        // Delete from the other storage bucket (ignore errors if it doesn't exist)
-        await supabase.storage.from(otherBucket).remove([otherPath]);
-      }
 
       setAlert({ open: true, msg: "File deleted successfully!", type: "success" });
 
@@ -786,15 +794,41 @@ function AdminDashboard({ auth }) {
                           <Select
                             value={noteCategory}
                             label="Category"
-                            onChange={(e) => setNoteCategory(e.target.value)}
+                            onChange={(e) => {
+                              const next = e.target.value;
+                              setNoteCategory(next);
+                          
+                              // reset scheduling-only fields when category changes
+                              if (next !== "Scheduling") {
+                                setNoteLocation("");
+                              }
+                            }}
                             sx={{ "& .MuiSelect-select": { py: 1 } }}
                           >
                             <MenuItem value="General Tips">General Tips</MenuItem>
                             <MenuItem value="Preps">Preps</MenuItem>
-                            <MenuItem value="Scheduling">Scheduling</MenuItem>
+                            <MenuItem value="Scheduling">Locations / Rooms</MenuItem>
                             <MenuItem value="Other">Other</MenuItem>
                           </Select>
                         </FormControl>
+
+                        {noteCategory === "Scheduling" && (
+                          <FormControl fullWidth size="small">
+                            <InputLabel>Location</InputLabel>
+                            <Select
+                              value={noteLocation}
+                              label="Location"
+                              onChange={(e) => setNoteLocation(e.target.value)}
+                              sx={{ "& .MuiSelect-select": { py: 1 } }}
+                            >
+                              {LOCATION_OPTIONS.map((loc) => (
+                                <MenuItem key={loc} value={loc}>
+                                  {loc}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        )}
 
                         <TextField
                           size="small"
@@ -823,7 +857,12 @@ function AdminDashboard({ auth }) {
                             background: "linear-gradient(90deg, #E41C77, #00ADEF)",
                           }}
                           onClick={handleAddPolicy}
-                          disabled={!noteTitle.trim() || !noteContent.trim() || !noteCategory}
+                          disabled={
+                            !noteTitle.trim() ||
+                            !noteContent.trim() ||
+                            !noteCategory ||
+                            (noteCategory === "Scheduling" && !noteLocation)
+                          }
                         >
                           Save Policy
                         </Button>
