@@ -134,7 +134,7 @@ import {
   //FIX ME: NEED EXAMS_CLEANUP ENDPOINT
   if (fileType === "Locations/Rooms") {
       // Call exams_cleanup for Locations/Rooms
-      await fetch("https://sinai-nexus-backend.onrender.com/exams_cleanup", {
+      await fetch("http://127.0.0.1:8000/exams_cleanup", {
         method: "POST",
         body: JSON.stringify({ file_path: fullPath }),
         headers: { "Content-Type": "application/json", "Accept": "application/json" },
@@ -148,7 +148,7 @@ import {
       formData.append("path", fullPath);       //Path for file
  
  
-      await fetch("https://sinai-nexus-backend.onrender.com/upload", {
+      await fetch("http://127.0.0.1:8000/upload", {
         method: "POST",
         body: formData,                        // multipart/form-data
       });
@@ -193,7 +193,7 @@ import {
   // -----------------------------
   const handleResetIndex = async () => {
     try {
-      const res = await fetch("https://sinai-nexus-backend.onrender.com/init_index", {
+      const res = await fetch("http://localhost:8000/init_index", {
         method: "POST",
       });
       const data = await res.json();
@@ -211,78 +211,86 @@ import {
   // -----------------------------
   // Add text note
   // -----------------------------
+  // -----------------------------
+// Add text note
+// -----------------------------
   const handleAddPolicy = async () => {
     if (!noteTitle.trim() || !noteContent.trim()) return;
-     const noteData = {
+    const noteData = {
       title: noteTitle.trim(),
       content: noteContent.trim(),
       created_at: new Date().toISOString(),
     };
-     const blob = new Blob([JSON.stringify(noteData, null, 2)], {
+    const blob = new Blob([JSON.stringify(noteData, null, 2)], {
       type: "application/json",
     });
-     const fileName = `${noteTitle}`;
-     // Upload locations
+    // Sanitize filename and add .json extension
+    const sanitizedTitle = noteTitle.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+    const fileName = `${sanitizedTitle}.json`;
+    // Upload locations
     const uploads = [
       { bucket: "epic-scheduling", folder: "Scheduling_Notes" },
       { bucket: "other-content", folder: "Other_Notes" },
     ];
-     try {
+    try {
       let publicUrl = null;
-       for (const { bucket, folder } of uploads) {
+      for (const { bucket, folder } of uploads) {
         const safeFolder = folder.replace(/\//g, "_").replace(/ /g, "_");
         const filePath = `${safeFolder}/${fileName}`;
-         // Upload
+        // Upload
         const { error } = await supabase.storage
           .from(bucket)
           .upload(filePath, blob, { cacheControl: "3600", upsert: true });
-         if (error) throw error;
-         // Get public URL (use the first bucket’s URL)
+        if (error) throw error;
+        // Get public URL (use the first bucket's URL)
         if (!publicUrl) {
           const { data: urlData } = supabase.storage
             .from(bucket)
             .getPublicUrl(filePath);
           publicUrl = urlData.publicUrl;
         }
- 
- 
+
+
         // Other_Notes → /upload (UploadFile + priority)
         if (folder === "Other_Notes") {
+          // Convert Blob to File with proper filename
+          const file = new File([blob], fileName, { type: "application/json" });
+          
           const formData = new FormData();
-          formData.append("file", blob);
-          formData.append("priority", "1"); // default priority
-          formData.append("path",`${bucket}/${filePath}`);
- 
- 
-          await fetch("https://sinai-nexus-backend.onrender.com/upload", {
+          formData.append("file", file);  // Send File object instead of Blob
+          formData.append("priority", "1");
+          formData.append("path", `${bucket}/${filePath}`);
+
+
+          await fetch("http://127.0.0.1:8000/upload", {
             method: "POST",
             body: formData,
           });
         }
- 
- 
+
+
         //  Scheduling_Notes → skip for now (folder === "Scheduling_Notes")
         else {
           // intentionally do nothing
           console.log("Skipping Scheduling_Notes backend upload for now.");
         }
       }
-       // Add to React state using real Supabase URL
+      // Add to React state using real Supabase URL
       const newNote = {
         name: fileName,
         type: "note",
         url: publicUrl,
       };
-       setFiles((prev) => [...prev, newNote]);
-       setAlert({
+      setFiles((prev) => [...prev, newNote]);
+      setAlert({
         open: true,
         msg: "Policy notes successfully uploaded",
         type: "success",
       });
-       // Reset
+      // Reset
       setNoteTitle("");
       setNoteContent("");
-       // Reload lists
+      // Reload lists
       loadAllFiles();
     }
     catch (err) {
@@ -357,43 +365,76 @@ import {
  
  
   const handleDeleteSupabase = async (file) => {
-   if (!file) return;
- 
-   const file_path = `${file.bucket}/${file.fullPath}`;
- 
-   try {
-     // Delete from RAG DB
-     const res = await fetch("https://sinai-nexus-backend.onrender.com/delete_file", {
-       method: "POST",
-       headers: { "Content-Type": "application/json" },
-       body: JSON.stringify({ file_path }),
-     });
- 
-     const data = await res.json();
-     console.log("delete_file DB result:", data);
- 
-     // Delete from Supabase Storage
-     const { error } = await supabase.storage
-       .from(file.bucket)
-       .remove([file.fullPath]);
- 
-     if (error) throw error;
- 
-     // Remove from UI immediately
-     setFiles(prev =>
-       prev.filter(f =>
-         !(f.bucket === file.bucket && f.fullPath === file.fullPath)
-       )
-     );
- 
-     setAlert({ open: true, msg: "File deleted!", type: "success" });
-   } catch (err) {
-     console.error("Deletion error:", err);
-     setAlert({ open: true, msg: "Error deleting file", type: "error" });
-   }
- };
- 
- 
+    if (!file || !file.bucket || !file.fullPath) {
+      console.error("Invalid file object for deletion:", file);
+      setAlert({
+        open: true,
+        msg: "Cannot delete: file info missing",
+        type: "error",
+      });
+      return;
+    }
+  
+  
+    const fullPath_with_bucket = `${file.bucket}/${file.fullPath}`;
+     try {
+      // Call backend delete for ALL buckets to remove embeddings
+      const res = await fetch("http://127.0.0.1:8000/delete-file", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ file_path: fullPath_with_bucket }),
+      });
+  
+      const data = await res.json();
+  
+      console.log("🟦 delete_file response:", data);
+      console.log("🟦 Sent file_path:", fullPath_with_bucket);
+  
+      if (!res.ok) {
+        console.error("Backend delete failed:", data);
+      }
+  
+      // Delete from Supabase storage (current bucket)
+      const { error } = await supabase.storage
+        .from(file.bucket)
+        .remove([file.fullPath]);
+       if (error) throw error;
+  
+      // If it's a note that was uploaded to both buckets, delete from the other bucket too
+      if (file.type === "note") {
+        const otherBucket = file.bucket === "epic-scheduling" ? "other-content" : "epic-scheduling";
+        const otherFolder = file.bucket === "epic-scheduling" ? "Other_Notes" : "Scheduling_Notes";
+        const otherPath = `${otherFolder}/${file.name}`;
+        const otherFullPath = `${otherBucket}/${otherPath}`;
+        
+        // Also delete embeddings for the other bucket path
+        await fetch("http://127.0.0.1:8000/delete-file", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({ file_path: otherFullPath }),
+        });
+        
+        // Delete from the other storage bucket (ignore errors if it doesn't exist)
+        await supabase.storage.from(otherBucket).remove([otherPath]);
+      }
+  
+      setAlert({ open: true, msg: "File deleted successfully!", type: "success" });
+       // Refresh list after deleting
+      loadAllFiles();
+     } catch (err) {
+      console.error("Supabase deletion error:", err);
+      setAlert({ open: true, msg: "Error deleting file", type: "error" });
+    }
+  };
+
+
+
    const confirmDelete = () => {
     if (!fileToDelete) return;
     handleDeleteSupabase(fileToDelete);

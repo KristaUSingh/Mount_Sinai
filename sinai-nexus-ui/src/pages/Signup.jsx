@@ -49,7 +49,7 @@ function Signup() {
       const { data, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
-        options: { emailRedirectTo: "http://sinainexus.vercel.app/login" },
+        options: { emailRedirectTo: "http://localhost:5173/login" },
       });
 
       if (signUpError) throw signUpError;
