@@ -5,7 +5,7 @@
 #   Implement the core logic for each scheduling question type.
 # -------------------------------------------------------------
 
-from src.data_loader import df, PREFIX_TO_DEP, USER_UPDATES
+from src.data_loader import df, ROOM_PREFIX_TO_LOCATION, USER_UPDATES
 from src.fuzzy_matchers import best_exam_match, best_site_match
 
 # -------------------------------------------------------------
@@ -30,33 +30,38 @@ from src.fuzzy_matchers import best_exam_match, best_site_match
 # Output:
 #   True  → some match exists (likely offered there)
 #   False → no match found (or not enough info provided)
+#   Also returns the best-matched official exam and site names.
 # -------------------------------------------------------------
 def exam_at_site(exam_query, site_query):
     # Try to find likely official names for the exam and site
-    exams = best_exam_match(exam_query)
-    sites = best_site_match(site_query)
+    exam = best_exam_match(exam_query)
+    site_match = best_site_match(site_query)
+    if not site_match:
+        return (False, exam, None)
+
+    site, deps = site_match     # best_site_match now returns (prefix (AKA location name), [dep1, dep2, ...])
+    # site = best_site_match(site_query)
 
     # If we couldn't confidently guess either side, we can't confirm availability
-    if not exams or not sites:
-        return False
-    
-    site = sites[0]
-    exam = exams[0]
+    if not exam or not deps:
+        return (False, exam, site)
 
     # 🧠 Check if this pair is listed as disabled
     for entry in USER_UPDATES.get("disabled_exams", []):
         if (
             entry["exam"].lower() == exam.lower()
-            and entry["site"].lower() == site.lower()
+            and entry["site"].lower() in [d.lower() for d in deps]
         ):
             print(f"⚠️ Note: {exam} at {site} temporarily disabled ({entry['reason']})")
-            return False
+            return (False, exam, site)
 
     # Filter the table to rows where BOTH the exam and site are among our best guesses
-    subset = df[df["EAP Name"].isin(exams) & df["DEP Name"].isin(sites)]
+    subset = df[(df["EAP Name"]==exam) & (df["DEP Name"].isin(deps))]
 
     # If there is at least one row, then yes — that exam is offered at that site
-    return not subset.empty
+    found = not subset.empty
+
+    return (found, exam, site)
 
 
 # -------------------------------------------------------------
@@ -76,22 +81,23 @@ def exam_at_site(exam_query, site_query):
 # Output:
 #   A list of site names (strings).
 #   Empty list → exam not found (or couldn't guess it confidently).
+#.  Also 
 # -------------------------------------------------------------
 def locations_for_exam(exam_query):
-    exams = best_exam_match(exam_query)
-    print("DEBUG – exams matched for locations_for_exam:", exams)
+    exam = best_exam_match(exam_query)
+    # print("DEBUG – exam matched for locations_for_exam:", exam)
 
-    if not exams:
-        return []
-
-    # Choose the best exam match (first in the list)
-    exam = exams[0]
+    if not exam:
+        return ([], None)
 
     # All rows that match any of the most likely exam name
     matches = df[df["EAP Name"] == exam]
 
-    # Return distinct site names as a simple Python list
-    return matches["DEP Name"].drop_duplicates().tolist()
+    # Get distinct site names as a simple Python list
+    sites = matches["DEP Name"].drop_duplicates().tolist()
+
+    # Return the list of sites and the official exam name
+    return (sites, exam)
 
 
 # -------------------------------------------------------------
@@ -113,15 +119,20 @@ def locations_for_exam(exam_query):
 
 def exams_at_site(site_query: str):
     """
-    Return all unique exam names available at a given site.
+    Return all unique exam names available at a given site and the official site name.
     Uses the fuzzy site matching function to allow
     flexible wording (e.g. '1176 fifth ave' → '1176 5TH AVE RAD CT').
     """
-    sites = best_site_match(site_query)
-    if not sites:
-        return []
-    subset = df[df["DEP Name"].isin(sites)]
-    return subset["EAP Name"].drop_duplicates().tolist()
+    site_match = best_site_match(site_query)
+    if not site_match:
+        return ([], None)
+
+    site, deps = site_match     # best_site_match now returns (prefix (AKA location name), [dep1, dep2, ...])
+
+    subset = df[df["DEP Name"].isin(deps)]
+    exams = subset["EAP Name"].drop_duplicates().tolist()
+
+    return (exams, site)
 
 # -------------------------------------------------------------
 # Helper for intent 4: exam_duration
@@ -136,13 +147,13 @@ def exam_duration(exam_query: str):
 
     Uses fuzzy matching so partial or imprecise names still work.
     """
-    exams = best_exam_match(exam_query)
-    if not exams:
-        return None
+    exam = best_exam_match(exam_query)
+    if not exam:
+        return ([], None)
 
     # Get all unique durations (in case of duplicates)
     durations = (
-        df[df["EAP Name"].isin(exams)]["Visit Type Length"]
+        df[df["EAP Name"]==exam]["Visit Type Length"]
         .dropna()
         .unique()
         .tolist()
@@ -152,14 +163,14 @@ def exam_duration(exam_query: str):
         return None
 
     # Convert to integers or strings depending on dataset
-    return ", ".join(str(d) for d in durations)
+    return (", ".join(str(d) for d in durations), exam)
 
 # -------------------------------------------------------------
 # Helper for intent 5: rooms_for_exam_at_site
 # -------------------------------------------------------------
 def rooms_for_exam_at_site(exam_query: str, site_query: str):
     """
-    Return all room names at a given site that perform a specific exam.
+    Return all room names at a given site that perform a specific exam, as well as the official exam and site names.
 
     Logic:
       1. Find all rooms that perform the given exam.
@@ -173,19 +184,24 @@ def rooms_for_exam_at_site(exam_query: str, site_query: str):
     """
 
     # Step 1. Use fuzzy matching to identify the official exam name and site
-    exams = best_exam_match(exam_query)
-    sites = best_site_match(site_query)
-    if not exams or not sites:
-        return []
+    exam = best_exam_match(exam_query)
+    site_match = best_site_match(site_query)
+    if not exam or not site_match:
+        return ([], exam, None)
 
-    site = sites[0]  # take the best-matched site
-    matched_prefixes = [p for p, dep in PREFIX_TO_DEP.items() if dep == site]
+    site, _ = site_match  # site refers to location prefix/name (e.g., "1176 5TH AVE")
+
+    matched_prefixes = [
+    room_prefix
+    for room_prefix, location in ROOM_PREFIX_TO_LOCATION.items()
+    if location == site
+    ]
 
     if not matched_prefixes:
-        return []
+        return ([], exam, site)
 
     # Step 2. Get all room names associated with the given exam
-    subset = df[df["EAP Name"].isin(exams)]
+    subset = df[df["EAP Name"]==exam]
     all_rooms = subset["Room Name"].dropna().unique().tolist()
 
     # Step 3. Filter those rooms whose prefix matches the site's prefix
@@ -194,7 +210,7 @@ def rooms_for_exam_at_site(exam_query: str, site_query: str):
         if any(room.startswith(prefix) for prefix in matched_prefixes)
     ]
 
-    return sorted(rooms_at_site)
+    return (sorted(rooms_at_site), exam, site)
 
 # -------------------------------------------------------------
 # Helper for intent 6: rooms_for_exam
@@ -202,7 +218,7 @@ def rooms_for_exam_at_site(exam_query: str, site_query: str):
 def rooms_for_exam(exam_query: str):
     """
     Purpose:
-        Return ALL rooms (across all sites) that perform a given exam.
+        Return ALL rooms (across all sites) that perform a given exam and the official exam name.
 
     Example:
         Input:
@@ -215,13 +231,14 @@ def rooms_for_exam(exam_query: str):
         - Filter the dataframe to those exam(s)
         - Collect and return the unique room names
     """
-    exams = best_exam_match(exam_query)
-    if not exams:
-        return []
+    exam = best_exam_match(exam_query)
+    
+    if not exam:
+        return ([], exam)
 
-    subset = df[df["EAP Name"].isin(exams)]
+    subset = df[df["EAP Name"] == exam]
 
     # Drop duplicates, ignore missing values
     rooms = subset["Room Name"].dropna().unique().tolist()
 
-    return sorted(rooms)
+    return (sorted(rooms), exam)

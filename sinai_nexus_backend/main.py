@@ -12,6 +12,8 @@ from fastapi import FastAPI, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from typing import Optional
+
 
 from unstructured.partition.auto import partition
 from supabase import create_client
@@ -118,7 +120,8 @@ class AgentChatRequest(BaseModel):
 def agent_chat(payload: AgentChatRequest):
     """Deterministic scheduling Q&A"""
     try:
-        answer = answer_scheduling_query(payload.question)
+        # pass supabase so location notes can be pulled from DB
+        answer = answer_scheduling_query(payload.question, supabase=supabase)
         return {"answer": answer}
     except Exception as e:
         return {"answer": f"Error: {str(e)}"}
@@ -127,7 +130,7 @@ def agent_chat(payload: AgentChatRequest):
 # 2️⃣ Upload → Parse → Chunk → Embed → Insert into Supabase
 # ===============================================================
 @app.post("/upload")
-async def upload_file(file: UploadFile, priority: int = Form(3), path: str = Form(None)):
+async def upload_file(file: UploadFile, priority: int = Form(3), path: str = Form(None), location: Optional[str] = Form(None),):
     """
     Upload a document or JSON note, chunk it, embed it, store it in Supabase.
     priority = 1 (highest), 2, or 3 (lowest, default)
@@ -173,12 +176,18 @@ async def upload_file(file: UploadFile, priority: int = Form(3), path: str = For
 
     rows = []
     for chunk, emb_vector in zip(chunks, embeddings):
-        rows.append({
+        row = {
             "content": chunk,
             "embedding": emb_vector.tolist(),
             "priority": priority,
             "file_path": storage_path
-        })
+        }
+
+        # Add ONLY what we need: location metadata for scheduling notes
+        if location:
+            row["location"] = location
+
+        rows.append(row)
 
     if rows:
         supabase.table("documents").insert(rows).execute()

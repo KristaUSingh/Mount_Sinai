@@ -16,6 +16,9 @@ from supabase import create_client
 import os
 from io import BytesIO
 from dotenv import load_dotenv
+from data.location_prefixes import LOCATION_PREFIXES
+# Load prefix-to-department mapping
+from data.room_location_map import ROOM_PREFIX_TO_LOCATION
 
 load_dotenv()  
 
@@ -36,9 +39,6 @@ if not res:
 # Read Parquet directly into DataFrame: Loads the cleaned scheduling data
 df = pd.read_parquet(BytesIO(res))
 
-# Load prefix-to-department mapping
-with open("data/mapping.json") as f:
-    PREFIX_TO_DEP = json.load(f)
 
 # Load user updates (if file exists)
 try:
@@ -46,3 +46,30 @@ try:
         USER_UPDATES = json.load(f)
 except FileNotFoundError:
     USER_UPDATES = {"disabled_exams": []}
+
+# Build a mapping from location prefixes to full department names
+# One location prefix may correspond to multiple department names
+# This creates a mapping like:
+# {
+#   "1176 5TH AVE": [
+#       "1176 5TH AVE RAD CT",
+#       "1176 5TH AVE RAD MRI"
+#   ],
+#   "10 UNION SQ E": [
+#       "10 UNION SQ E RAD MRI"
+#   ]
+# }
+
+LOCATION_TO_DEPARTMENTS = {}
+
+for prefix in LOCATION_PREFIXES.keys():
+    deps = (
+        df[df["DEP Name"].str.startswith(prefix)]["DEP Name"]
+        .drop_duplicates()
+        .tolist()
+    )
+
+    if not deps:
+        print(f"⚠️ Warning: location prefix '{prefix}' matched no departments")
+
+    LOCATION_TO_DEPARTMENTS[prefix] = deps

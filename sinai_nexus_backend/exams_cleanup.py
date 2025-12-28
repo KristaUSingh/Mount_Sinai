@@ -106,10 +106,19 @@ df["Room Name"] = df["Room Name"].str.strip()
 # Step 6 — (Optional) Filter Manhattan sites only
 # -------------------------------------------------------------
 manhattan_sites = [
-    "10 UNION SQ E RAD CT",
-    "1176 5TH AVE RAD CT",
-    "1470 MADISON AVE RAD CT"
+    "10 UNION SQ E",    # Union Square
+    "1090 AMST AVE",    # RA Morningside
+    "1176 5TH AVE",     # RA Main
+    "1470 MADISON AVE", # HESS
+    "425 W 59TH ST",    # Mt Sinai West
+    "787 11TH AVE",     # RA (787)
+    "325 W 15TH ST",    # Chelsea
+    "MSQ OP RAD",       # Mt Sinai Queens
+    "300 CADMAN PLAZA", # Brooklyn Heights
+    "MSM",              # Mount Sinai Morningside
+    "MSB"              # Mount Sinai Brooklyn  # Note the trailing space. It is NOT a typo. It is needed.
 ]
+
 
 # df = df[df["DEP Name"].isin(manhattan_sites)]
 
