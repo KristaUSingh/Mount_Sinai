@@ -212,8 +212,8 @@ function AgentChat({ auth, hideNavbar = false }) {
   const sendToBackend = async (question, activeMode) => {
     try {
       const endpoint = activeMode === "schedule"
-          ? "http://localhost:8000/agent-chat"
-          : "http://localhost:8000/rag-chat";
+          ? "https://sinai-nexus-backend.onrender.com/agent-chat"
+          : "https://sinai-nexus-backend.onrender.com/rag-chat";
       const body = activeMode === "schedule"
           ? JSON.stringify({ question })
           : new URLSearchParams({ query: question });

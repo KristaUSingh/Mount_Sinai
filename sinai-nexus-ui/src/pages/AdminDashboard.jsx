@@ -177,7 +177,7 @@ function AdminDashboard({ auth }) {
       //FIX ME: NEED EXAMS_CLEANUP ENDPOINT
       if (fileType === "Locations/Rooms") {
         // Call exams_cleanup for Locations/Rooms
-        await fetch("http://127.0.0.1:8000/exams_cleanup", {
+        await fetch("https://sinai-nexus-backend.onrender.com/exams_cleanup", {
           method: "POST",
           body: JSON.stringify({ file_path: fullPath }),
           headers: {
@@ -192,7 +192,7 @@ function AdminDashboard({ auth }) {
         formData.append("priority", "3");
         formData.append("path", fullPath);
 
-        await fetch("http://127.0.0.1:8000/upload", {
+        await fetch("https://sinai-nexus-backend.onrender.com/upload", {
           method: "POST",
           body: formData,
         });
@@ -234,7 +234,7 @@ function AdminDashboard({ auth }) {
   // -----------------------------
   const handleResetIndex = async () => {
     try {
-      const res = await fetch("http://localhost:8000/init_index", {
+      const res = await fetch("https://sinai-nexus-backend.onrender.com/init_index", {
         method: "POST",
       });
       const data = await res.json();
@@ -338,7 +338,7 @@ function AdminDashboard({ auth }) {
         if (noteEndDate) formData.append("end_date", toEndISO(noteEndDate));
 
 
-        await fetch("http://127.0.0.1:8000/upload", {
+        await fetch("https://sinai-nexus-backend.onrender.com/upload", {
           method: "POST",
           body: formData,
         });
@@ -467,7 +467,7 @@ function AdminDashboard({ auth }) {
     const fullPathWithBucket = `${file.bucket}/${file.fullPath}`; // ✅ FIXED
   
     try {
-      const res = await fetch("http://127.0.0.1:8000/delete-file", {
+      const res = await fetch("https://sinai-nexus-backend.onrender.com/delete-file", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
