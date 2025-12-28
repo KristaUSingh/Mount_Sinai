@@ -70,6 +70,25 @@ const LOCATION_OPTIONS = [
   "MSB",
 ];
 
+const sanitizeFilename = (name) => {
+  const parts = name.split(".");
+  const ext = (parts.pop() || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const base = parts
+    .join(".")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9-_]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  return `${base || "file"}.${ext || "bin"}`;
+};
+
+const HIDDEN_KB_FILES = new Set([
+  "new_scheduling_clean.parquet", // canonical file (hide from UI)
+]);
+
+
 
 function AdminDashboard({ auth }) {
   const navigate = useNavigate();
@@ -379,6 +398,7 @@ function AdminDashboard({ auth }) {
       if (err1) console.error(err1);
       else {
         locRooms.forEach((f) => {
+          if (folder === "Locations_Rooms" && HIDDEN_KB_FILES.has(f.name)) return;
           const isNote = f.name.toLowerCase().endsWith(".json");
 
           results.push({
@@ -434,7 +454,7 @@ function AdminDashboard({ auth }) {
   // DELETE FILE
   // =========================================================
   const handleDeleteSupabase = async (file) => {
-    if (!file || !file.bucket || !file.fullPath) {
+    if (!file?.bucket || !file?.fullPath) {
       console.error("Invalid file object for deletion:", file);
       setAlert({
         open: true,
@@ -443,45 +463,33 @@ function AdminDashboard({ auth }) {
       });
       return;
     }
-
-    const fullPath_with_bucket = `${file.bucket}/${file.fullPath}`;
-
+  
+    const fullPathWithBucket = `${file.bucket}/${file.fullPath}`; // ✅ FIXED
+  
     try {
-      // Call backend delete for ALL buckets to remove embeddings
       const res = await fetch("http://127.0.0.1:8000/delete-file", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
         },
-        body: JSON.stringify({ file_path: fullPath_with_bucket }),
+        body: JSON.stringify({ file_path: fullPathWithBucket }),
       });
-
+  
       const data = await res.json();
-
-      console.log("🟦 delete_file response:", data);
-      console.log("🟦 Sent file_path:", fullPath_with_bucket);
-
-      if (!res.ok) {
-        console.error("Backend delete failed:", data);
+      console.log("🟦 delete-file response:", data);
+  
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || "Backend delete failed");
       }
-
-      // Delete from Supabase storage (current bucket)
-      const { error } = await supabase.storage
-        .from(file.bucket)
-        .remove([file.fullPath]);
-
-      if (error) throw error;
-
+  
       setAlert({ open: true, msg: "File deleted successfully!", type: "success" });
-
-      // Refresh list after deleting
       loadAllFiles();
     } catch (err) {
       console.error("Supabase deletion error:", err);
       setAlert({ open: true, msg: "Error deleting file", type: "error" });
     }
-  };
+  };  
 
   const confirmDelete = () => {
     if (!fileToDelete) return;
@@ -720,9 +728,13 @@ function AdminDashboard({ auth }) {
                             type="file"
                             accept={`.${fileExtension}`}
                             onChange={(e) => {
-                              const file = e.target.files[0];
-                              if (!file) return;
-                              setSelectedFile(file);
+                              const raw = e.target.files[0];
+                              if (!raw) return;
+                          
+                              const safeName = sanitizeFilename(raw.name);
+                              const safeFile = new File([raw], safeName, { type: raw.type });
+                          
+                              setSelectedFile(safeFile);
                               e.target.value = "";
                             }}
                           />
