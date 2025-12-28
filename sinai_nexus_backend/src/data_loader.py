@@ -4,6 +4,10 @@
 # Purpose:
 #   Load the main scheduling dataset, room mappings, and update
 #   records into memory for other modules to use.
+#
+#   This ensures all data sources are initialized in one place,
+#   so that other modules (like query_handlers) can simply
+#   import df, PREFIX_TO_DEP, and USER_UPDATES directly.
 # -------------------------------------------------------------
 
 import pandas as pd
@@ -14,7 +18,7 @@ from io import BytesIO
 from dotenv import load_dotenv
 from data.location_prefixes import LOCATION_PREFIXES
 
-load_dotenv()
+load_dotenv()  
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
@@ -22,87 +26,43 @@ SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 bucket = "epic-scheduling"
-CANONICAL_PATH = "Locations_Rooms/new_scheduling_clean.parquet"
-FOLDER = "Locations_Rooms"
+path = "Locations_Rooms/new_scheduling_clean.parquet"
 
-# ✅ keep downstream logic safe no matter what
-EXPECTED_COLS = ["EAP Name", "Visit Type Name", "Visit Type Length", "DEP Name", "Room Name"]
+# Download Parquet bytes
+res = supabase.storage.from_(bucket).download(path)
 
-def _ensure_expected_cols(df: pd.DataFrame) -> pd.DataFrame:
-    for c in EXPECTED_COLS:
-        if c not in df.columns:
-            df[c] = None
-    return df[EXPECTED_COLS]
+if not res:
+    raise Exception("Unable to download parquet from Supabase")
 
-def _download_parquet(path: str) -> pd.DataFrame | None:
-    try:
-        res = supabase.storage.from_(bucket).download(path)
-        if not res:
-            return None
-        df_local = pd.read_parquet(BytesIO(res))
-        return _ensure_expected_cols(df_local)
-    except Exception as e:
-        print(f"⚠️ Warning: failed to load parquet {bucket}/{path}: {repr(e)}")
-        return None
+# Read Parquet directly into DataFrame: Loads the cleaned scheduling data
+df = pd.read_parquet(BytesIO(res))
 
-def _pick_latest_parquet_in_folder(folder: str) -> str | None:
-    try:
-        items = supabase.storage.from_(bucket).list(folder, {"limit": 200})
-        if not items:
-            return None
 
-        parquets = [it for it in items if str(it.get("name", "")).lower().endswith(".parquet")]
-        if not parquets:
-            return None
-
-        # Prefer updated_at if present, else fall back to name sorting
-        def sort_key(it):
-            # Supabase often returns ISO strings like "2025-12-28T..."
-            return it.get("updated_at") or it.get("created_at") or it.get("name")
-
-        parquets.sort(key=sort_key, reverse=True)
-        return f"{folder}/{parquets[0]['name']}"
-    except Exception as e:
-        print(f"⚠️ Warning: failed to list folder {bucket}/{folder}: {repr(e)}")
-        return None
-
-# -------------------------------------------------------------
-# Load scheduling parquet (canonical first, fallback to latest)
-# -------------------------------------------------------------
-df = _download_parquet(CANONICAL_PATH)
-
-loaded_path = CANONICAL_PATH if df is not None else None
-
-if df is None:
-    latest = _pick_latest_parquet_in_folder(FOLDER)
-    if latest:
-        df = _download_parquet(latest)
-        loaded_path = latest if df is not None else None
-
-if df is None:
-    print(f"⚠️ Warning: no scheduling parquet found in {bucket}/{FOLDER}. Using empty df.")
-    df = pd.DataFrame(columns=EXPECTED_COLS)
-    loaded_path = "(empty)"
-
-print(f"✅ Scheduling df loaded from: {loaded_path} | rows={len(df)} cols={list(df.columns)}")
-
-# -------------------------------------------------------------
 # Load user updates (if file exists)
-# -------------------------------------------------------------
 try:
     with open("data/updates.json") as f:
         USER_UPDATES = json.load(f)
 except FileNotFoundError:
     USER_UPDATES = {"disabled_exams": []}
 
-# -------------------------------------------------------------
 # Build a mapping from location prefixes to full department names
-# -------------------------------------------------------------
+# One location prefix may correspond to multiple department names
+# This creates a mapping like:
+# {
+#   "1176 5TH AVE": [
+#       "1176 5TH AVE RAD CT",
+#       "1176 5TH AVE RAD MRI"
+#   ],
+#   "10 UNION SQ E": [
+#       "10 UNION SQ E RAD MRI"
+#   ]
+# }
+
 LOCATION_TO_DEPARTMENTS = {}
 
 for prefix in LOCATION_PREFIXES.keys():
     deps = (
-        df[df["DEP Name"].astype(str).str.startswith(prefix)]["DEP Name"]
+        df[df["DEP Name"].str.startswith(prefix)]["DEP Name"]
         .drop_duplicates()
         .tolist()
     )
@@ -115,6 +75,9 @@ for prefix in LOCATION_PREFIXES.keys():
 # -------------------------------------------------------------
 # Room prefix → location prefix mapping
 # -------------------------------------------------------------
+# Example: "HESS" -> "1470 MADISON AVE", "RA" -> "1176 5TH AVE"
+# We infer it from the dataset so no hardcoding is needed.
+
 def _build_room_prefix_to_location(df: pd.DataFrame, location_prefixes: dict) -> dict:
     mapping = {}
     if "Room Name" not in df.columns or "DEP Name" not in df.columns:
@@ -124,10 +87,12 @@ def _build_room_prefix_to_location(df: pd.DataFrame, location_prefixes: dict) ->
         subset = df[df["DEP Name"].astype(str).str.startswith(loc_prefix)]
         rooms = subset["Room Name"].dropna().astype(str)
 
+        # room prefix = first token (e.g., "HESS CT ROOM 6" -> "HESS")
         first_tokens = rooms.str.split().str[0].dropna()
         if first_tokens.empty:
             continue
 
+        # take most common prefixes for this location
         for token in first_tokens.value_counts().head(15).index.tolist():
             mapping.setdefault(token, loc_prefix)
 

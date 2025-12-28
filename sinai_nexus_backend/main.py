@@ -6,9 +6,6 @@ import os
 import json
 import numpy as np
 import requests
-import re
-import pandas as pd
-from io import StringIO, BytesIO
 import google.generativeai as genai
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -23,26 +20,16 @@ from typing import Optional
 from unstructured.partition.auto import partition
 from supabase import create_client
 
-# ------------------------------
-# FastAPI App FIRST
-# ------------------------------
+
 app = FastAPI(title="Sinai Nexus Backend (Supabase RAG)")
 
-ALLOWED_ORIGINS = [
-    "https://sinainexus.vercel.app",
-    "https://www.sinainexus.vercel.app",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
-
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-    max_age=86400,
+    allow_methods=["*"],  # Allows all methods (GET, POST, DELETE, etc.)
+    allow_headers=["*"],  # Allows all headers
 )
 
 # ------------------------------
@@ -125,128 +112,6 @@ def hf_embed(texts, normalize: bool = EMBED_NORMALIZE) -> np.ndarray:
 # ------------------------------
 # FastAPI App
 # ------------------------------
-
-class ExamsCleanupRequest(BaseModel):
-    file_path: str  # "epic-scheduling/Locations_Rooms/<file>.csv"
-
-def sanitize_base(name: str) -> str:
-    name = os.path.splitext(os.path.basename(name))[0]
-    name = re.sub(r"[^a-zA-Z0-9-_]+", "_", name)
-    name = re.sub(r"_+", "_", name).strip("_")
-    return name or "locations_rooms"
-
-def _simplify_col(s: str) -> str:
-    # normalize: lowercase, remove non-alphanum
-    return re.sub(r"[^a-z0-9]+", "", (s or "").strip().lower())
-
-def _find_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
-    lookup = {_simplify_col(c): c for c in df.columns}
-    for cand in candidates:
-        key = _simplify_col(cand)
-        if key in lookup:
-            return lookup[key]
-    return None
-
-@app.post("/exams_cleanup")
-def exams_cleanup(req: ExamsCleanupRequest):
-    fp = (req.file_path or "").strip()
-    if "/" not in fp:
-        return {"ok": False, "error": "file_path must be like 'bucket/path/file.csv'"}
-
-    bucket, rel_path = fp.split("/", 1)
-
-    # download CSV bytes
-    csv_bytes = supabase.storage.from_(bucket).download(rel_path)
-    if not csv_bytes:
-        return {"ok": False, "error": f"Unable to download {fp}"}
-
-    # read CSV
-    df = pd.read_csv(StringIO(csv_bytes.decode("latin-1")))
-    df.columns = [c.strip() for c in df.columns]  # trim header whitespace
-
-    # ✅ Support BOTH old and new headers (and minor variants)
-    eap_src = _find_col(df, ["EAP Name", "Procedure Name"])
-    dep_src = _find_col(df, ["DEP Name", "Department Name"])
-    room_src = _find_col(df, ["Room Name", "Resource Name"])
-    visit_name_src = _find_col(df, ["Visit Type Name"])
-    visit_len_src = _find_col(df, ["Visit Type Length"])
-
-    missing = []
-    if not eap_src: missing.append("EAP Name / Procedure Name")
-    if not dep_src: missing.append("DEP Name / Department Name")
-    if not room_src: missing.append("Room Name / Resource Name")
-    if not visit_name_src: missing.append("Visit Type Name")
-    if not visit_len_src: missing.append("Visit Type Length")
-
-    if missing:
-        return {
-            "ok": False,
-            "error": "CSV columns did not match expected format.",
-            "missing": missing,
-            "found_columns": df.columns.tolist(),
-        }
-
-    # rename to canonical columns your backend expects
-    df = df.rename(columns={
-        eap_src: "EAP Name",
-        visit_name_src: "Visit Type Name",
-        visit_len_src: "Visit Type Length",
-        dep_src: "DEP Name",
-        room_src: "Room Name",
-    })
-
-    # explode multiline fields
-    df["DEP Name"] = df["DEP Name"].fillna("").astype(str).str.split("\n")
-    df["Room Name"] = df["Room Name"].fillna("").astype(str).str.split("\n")
-    df = df.explode("DEP Name").explode("Room Name").reset_index(drop=True)
-
-    # strip whitespace
-    df["DEP Name"] = df["DEP Name"].astype(str).str.strip()
-    df["Room Name"] = df["Room Name"].astype(str).str.strip()
-
-    # keep only expected cols
-    df = df[["EAP Name", "Visit Type Name", "Visit Type Length", "DEP Name", "Room Name"]]
-
-    # parquet bytes
-    buf = BytesIO()
-    df.to_parquet(buf, index=False)
-    buf.seek(0)
-
-    base = sanitize_base(rel_path)
-
-    # ✅ upload parquet named after the CSV
-    parquet_rel = f"Locations_Rooms/{base}.parquet"
-    supabase.storage.from_(bucket).upload(
-        parquet_rel,
-        buf.getvalue(),
-        file_options={
-            "content-type": "application/vnd.apache.parquet",
-            "x-upsert": "true",   # ✅ IMPORTANT: correct header for Supabase Storage
-        },
-    )
-
-    # ✅ overwrite canonical parquet your backend reads
-    canonical_rel = "Locations_Rooms/new_scheduling_clean.parquet"
-    supabase.storage.from_(bucket).upload(
-        canonical_rel,
-        buf.getvalue(),
-        file_options={
-            "content-type": "application/vnd.apache.parquet",
-            "x-upsert": "true",   # ✅ IMPORTANT: correct header for Supabase Storage
-        },
-    )
-
-    # delete the original CSV
-    supabase.storage.from_(bucket).remove([rel_path])
-
-    return {
-        "ok": True,
-        "uploaded_parquet": f"{bucket}/{parquet_rel}",
-        "updated_canonical": f"{bucket}/{canonical_rel}",
-        "deleted_csv": f"{bucket}/{rel_path}",
-        "rows": int(df.shape[0]),
-    }
-
 
 # ------------------------------
 class AgentChatRequest(BaseModel):
@@ -357,33 +222,23 @@ async def upload_file(
 # 3️⃣ Delete File Endpoint
 # ===============================================================
 class DeleteFileRequest(BaseModel):
-    file_path: str  # expects "bucket/relative/path.ext"
+    file_path: str
 
 @app.post("/delete-file")
 async def delete_file(request: DeleteFileRequest):
     """
-    Deletes:
-      1) all embeddings rows for this file_path from documents table
-      2) the actual file in Supabase Storage (service role)
+    Delete all chunks for a given file_path from Supabase.
     """
-    fp = (request.file_path or "").strip()
-    if "/" not in fp:
-        return {"ok": False, "error": "file_path must be like 'bucket/path/to/file'"}
+    print(f"\n🗑️ DELETE REQUEST for file_path: {request.file_path}")
 
-    bucket, rel_path = fp.split("/", 1)
+    result = supabase.table("documents").delete().eq("file_path", request.file_path).execute()
+    deleted_count = len(result.data) if result.data else 0
 
-    # 1) delete embeddings rows (if any)
-    result = supabase.table("documents").delete().eq("file_path", fp).execute()
-    deleted_rows = len(result.data) if result.data else 0
-
-    # 2) delete from storage
-    storage_res = supabase.storage.from_(bucket).remove([rel_path])
+    print(f"✅ Deleted {deleted_count} rows from documents table")
 
     return {
-        "ok": True,
-        "file_path": fp,
-        "deleted_rows": deleted_rows,
-        "storage_delete": storage_res,
+        "message": f"Deleted {deleted_count} chunks for {request.file_path}",
+        "count": deleted_count
     }
 
 
