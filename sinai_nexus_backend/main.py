@@ -21,15 +21,26 @@ from unstructured.partition.auto import partition
 from supabase import create_client
 
 
+# ------------------------------
+# FastAPI App FIRST
+# ------------------------------
 app = FastAPI(title="Sinai Nexus Backend (Supabase RAG)")
 
-# Add CORS middleware
+ALLOWED_ORIGINS = [
+    "https://sinainexus.vercel.app",
+    "https://www.sinainexus.vercel.app",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods (GET, POST, DELETE, etc.)
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=86400,
 )
 
 # ------------------------------
@@ -108,10 +119,6 @@ def hf_embed(texts, normalize: bool = EMBED_NORMALIZE) -> np.ndarray:
         vecs = vecs / norms
 
     return vecs
-
-# ------------------------------
-# FastAPI App
-# ------------------------------
 
 # ------------------------------
 class AgentChatRequest(BaseModel):
