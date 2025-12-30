@@ -1,6 +1,15 @@
 # -------------------------------------------------------------
 # exams_cleanup.py
 # -------------------------------------------------------------
+# Robust CSV → Parquet cleaner for Sinai scheduling exports
+# Works with BOTH:
+#   - Old format:  EAP Name, DEP Name, Room Name...
+#   - New format:  Procedure Name, Department Name, Resource Name...
+# Fixes UTF-8 BOM issues, and uploads:
+#   1) Locations_Rooms/<CSV_FILENAME>.parquet  (traceable)
+#   2) Locations_Rooms/new_scheduling_clean.parquet (canonical for app)
+# -------------------------------------------------------------
+
 from supabase import create_client
 import pandas as pd
 from io import StringIO, BytesIO
@@ -19,8 +28,7 @@ CSV_FILE_PATH = os.getenv("CSV_FILE_PATH", "Locations_Rooms/scheduling.csv")
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
     raise Exception("Missing SUPABASE_URL or SUPABASE_SERVICE_KEY environment variables")
 
-# Optional: remove the warning about trailing slash
-# (won't fix your crash, but cleans logs)
+# Optional: remove the warning about trailing slash (won't break if you skip this)
 if SUPABASE_URL and not SUPABASE_URL.endswith("/"):
     SUPABASE_URL = SUPABASE_URL + "/"
 
@@ -125,17 +133,36 @@ print("✅ Parquet generated in memory")
 # -------------------------------------------------------------
 # Step 10 — Upload Parquet to Supabase Storage
 # -------------------------------------------------------------
-parquet_path = "Locations_Rooms/new_scheduling_clean.parquet"
+# 1) Name parquet based on the CSV filename (traceable)
+original_filename = file_path.split("/")[-1]      # e.g. All_Exams_locations_trial.csv
+base_name = original_filename.rsplit(".", 1)[0]   # e.g. All_Exams_locations_trial
+named_parquet_path = f"Locations_Rooms/{base_name}.parquet"
 
-# ✅ IMPORTANT: upsert must be a STRING (headers can't be bool)
+# 2) Also upload to canonical file your app expects/hides
+canonical_parquet_path = "Locations_Rooms/new_scheduling_clean.parquet"
+
+parquet_bytes = buffer.getvalue()
+
+# Upload named parquet
 supabase.storage.from_(bucket_name).upload(
-    parquet_path,
-    buffer.getvalue(),
+    named_parquet_path,
+    parquet_bytes,
     file_options={
         "content-type": "application/vnd.apache.parquet",
         "upsert": "true",
     }
 )
+print(f"🎉 Uploaded parquet to Supabase: {named_parquet_path}")
 
-print(f"🎉 Uploaded parquet to Supabase: {parquet_path}")
+# Upload canonical parquet (overwrite)
+supabase.storage.from_(bucket_name).upload(
+    canonical_parquet_path,
+    parquet_bytes,
+    file_options={
+        "content-type": "application/vnd.apache.parquet",
+        "upsert": "true",
+    }
+)
+print(f"🎉 Uploaded parquet to Supabase: {canonical_parquet_path}")
+
 print("✅ Processing complete!")
