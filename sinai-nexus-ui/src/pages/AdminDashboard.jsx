@@ -174,47 +174,64 @@ function AdminDashboard({ auth }) {
       // -----------------------------
       // Post-upload backend processing
       // -----------------------------
-      // In handleUploadSupabase function, replace the exams_cleanup section:
-
       if (fileType === "Locations/Rooms") {
         setKbLoadingMsg("Triggering background processing for scheduling data...");
         
         const res = await fetch("https://sinai-nexus-backend.onrender.com/trigger_csv_processing", {
           method: "POST",
-          body: JSON.stringify({ file_path: filePath }),
+          body: JSON.stringify({ file_path: filePath }), // Just filePath, not fullPath
           headers: {
             "Content-Type": "application/json",
             Accept: "application/json",
           },
         });
-
+  
         if (!res.ok) {
           const txt = await res.text().catch(() => "");
           throw new Error(`Failed to trigger processing: ${txt || res.status}`);
         }
         
-        const data = await res.json();
+        const responseData = await res.json();
+        console.log("🟢 trigger_csv_processing response:", responseData);
         
-        if (data.ok) {
-          setAlert({
-            open: true,
-            msg: "CSV uploaded! Processing will complete in 1-2 minutes. The parquet file will appear automatically.",
-            type: "success",
-          });
-        } else {
-          throw new Error(data.error || "Unknown error");
+        if (!responseData.ok) {
+          throw new Error(responseData.error || "Unknown error");
         }
-      }
   
-      setAlert({
-        open: true,
-        msg: "File uploaded successfully!",
-        type: "success",
-      });
+        setAlert({
+          open: true,
+          msg: "CSV uploaded! Processing will complete in 1-2 minutes. Refresh to see the parquet file.",
+          type: "success",
+        });
+      } else {
+        // For non-CSV files (PDFs, DOCX, MD), create embeddings
+        setKbLoadingMsg("Creating embeddings and updating knowledge base...");
+  
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("priority", "3");
+        formData.append("path", fullPath);
+  
+        const res = await fetch("https://sinai-nexus-backend.onrender.com/upload", {
+          method: "POST",
+          body: formData,
+        });
+  
+        if (!res.ok) {
+          const txt = await res.text().catch(() => "");
+          throw new Error(`upload failed: ${txt || res.status}`);
+        }
+  
+        setAlert({
+          open: true,
+          msg: "File uploaded successfully!",
+          type: "success",
+        });
+      }
   
       await loadAllFiles();
     } catch (err) {
-      console.error(err);
+      console.error("Upload error:", err);
   
       if (
         err.message &&
@@ -239,7 +256,7 @@ function AdminDashboard({ auth }) {
       } else {
         setAlert({
           open: true,
-          msg: "Error uploading file.",
+          msg: `Error uploading file: ${err.message || "Unknown error"}`,
           type: "error",
         });
       }
