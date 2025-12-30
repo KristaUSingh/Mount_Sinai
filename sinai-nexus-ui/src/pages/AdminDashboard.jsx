@@ -44,6 +44,8 @@ import FolderIcon from "@mui/icons-material/Folder";
 import SearchIcon from "@mui/icons-material/Search";
 import DescriptionIcon from "@mui/icons-material/Description";
 import StickyNote2Icon from "@mui/icons-material/StickyNote2";
+import Backdrop from "@mui/material/Backdrop";
+import CircularProgress from "@mui/material/CircularProgress";
 
 import { useState, useEffect, forwardRef } from "react";
 import { useNavigate } from "react-router-dom";
@@ -119,6 +121,9 @@ function AdminDashboard({ auth }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterTab, setFilterTab] = useState(0); // 0=All, 1=Protocols, 2=Notes
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [kbLoading, setKbLoading] = useState(false);
+  const [kbLoadingMsg, setKbLoadingMsg] = useState("");
+
 
   useEffect(() => {
     loadAllFiles();
@@ -129,11 +134,11 @@ function AdminDashboard({ auth }) {
   // -----------------------------
   const handleUploadSupabase = async (file) => {
     if (!file || !fileType || !fileExtension) return;
-
+  
     // Get actual file extension
     const fileParts = file.name.split(".");
     const actualExtension = fileParts[fileParts.length - 1].toLowerCase();
-
+  
     // Check if actual extension matches selected fileExtension
     if (actualExtension !== fileExtension.toLowerCase()) {
       setAlert({
@@ -141,43 +146,37 @@ function AdminDashboard({ auth }) {
         msg: "File uploaded does not match file extension chosen",
         type: "error",
       });
-      return; // Stop upload
+      return;
     }
-
-    // Choose bucket
+  
     const bucketName =
       fileType === "Locations/Rooms" ? "epic-scheduling" : "other-content";
-
+  
     const safeFolder = fileType.replace(/\//g, "_").replace(/ /g, "_");
     const filePath = `${safeFolder}/${file.name}`;
-
+    const fullPath = `${bucketName}/${filePath}`;
+  
     try {
+      setKbLoading(true);
+      setKbLoadingMsg("Uploading file to storage...");
+  
       const { data, error } = await supabase.storage
         .from(bucketName)
         .upload(filePath, file, {
           cacheControl: "3600",
           upsert: false,
         });
-
+  
       if (error) throw error;
-
-      setAlert({
-        open: true,
-        msg: "File uploaded successfully!",
-        type: "success",
-      });
-
+  
       console.log("Uploaded file info:", data);
-
-      const fullPath = `${bucketName}/${filePath}`;
-
+  
       // -----------------------------
       // Post-upload backend processing
       // -----------------------------
-      //FIX ME: NEED EXAMS_CLEANUP ENDPOINT
       if (fileType === "Locations/Rooms") {
-        // Call exams_cleanup for Locations/Rooms
-        await fetch("https://sinai-nexus-backend.onrender.com/exams_cleanup", {
+        setKbLoadingMsg("Updating scheduling index (Locations/Rooms)...");
+        const res = await fetch("https://sinai-nexus-backend.onrender.com/exams_cleanup", {
           method: "POST",
           body: JSON.stringify({ file_path: fullPath }),
           headers: {
@@ -185,19 +184,40 @@ function AdminDashboard({ auth }) {
             Accept: "application/json",
           },
         });
+  
+        if (!res.ok) {
+          const txt = await res.text().catch(() => "");
+          throw new Error(`exams_cleanup failed: ${txt || res.status}`);
+        }
       } else {
-        // Everything else → /upload
+        setKbLoadingMsg("Creating embeddings and updating knowledge base...");
+  
         const formData = new FormData();
         formData.append("file", file);
         formData.append("priority", "3");
         formData.append("path", fullPath);
-
-        await fetch("https://sinai-nexus-backend.onrender.com/upload", {
+  
+        const res = await fetch("https://sinai-nexus-backend.onrender.com/upload", {
           method: "POST",
           body: formData,
         });
+  
+        if (!res.ok) {
+          const txt = await res.text().catch(() => "");
+          throw new Error(`upload failed: ${txt || res.status}`);
+        }
       }
+  
+      setAlert({
+        open: true,
+        msg: "File uploaded successfully!",
+        type: "success",
+      });
+  
+      await loadAllFiles();
     } catch (err) {
+      console.error(err);
+  
       if (
         err.message &&
         err.message.includes("mime type") &&
@@ -219,13 +239,15 @@ function AdminDashboard({ auth }) {
           type: "error",
         });
       } else {
-        console.error(err);
         setAlert({
           open: true,
           msg: "Error uploading file.",
           type: "error",
         });
       }
+    } finally {
+      setKbLoading(false);
+      setKbLoadingMsg("");
     }
   };
 
@@ -257,9 +279,8 @@ function AdminDashboard({ auth }) {
 
   const handleAddPolicy = async () => {
     if (!noteTitle.trim() || !noteContent.trim() || !noteCategory) return;
-    // If Scheduling + location note, require location selection
     if (noteCategory === "Scheduling" && !noteLocation) return;
-
+  
     const noteData = {
       title: noteTitle.trim(),
       content: noteContent.trim(),
@@ -267,24 +288,24 @@ function AdminDashboard({ auth }) {
       location: noteCategory === "Scheduling" ? noteLocation : null,
       created_at: new Date().toISOString(),
       start_date: noteStartDate ? toStartISO(noteStartDate) : null,
-      end_date: noteEndDate ? toEndISO(noteEndDate) : null,    
+      end_date: noteEndDate ? toEndISO(noteEndDate) : null,
     };
-
+  
     const blob = new Blob([JSON.stringify(noteData, null, 2)], {
       type: "application/json",
     });
-
+  
     // Sanitize filename and add .json extension
     const sanitizedTitle = noteTitle.trim().replace(/[^a-zA-Z0-9_-]/g, "_");
     const safeLoc =
       noteCategory === "Scheduling" && noteLocation
         ? noteLocation.replace(/[^a-zA-Z0-9_-]/g, "_")
         : null;
-
+  
     const fileName = safeLoc
       ? `LOC_${safeLoc}__${sanitizedTitle}.json`
       : `${sanitizedTitle}.json`;
-
+  
     // Map category to folder structure
     const categoryFolderMap = {
       "General Tips": "General_Tips",
@@ -292,58 +313,65 @@ function AdminDashboard({ auth }) {
       Scheduling: "Scheduling_Notes",
       Other: "Other_Notes",
     };
-
+  
     const targetFolder = categoryFolderMap[noteCategory];
-
-
-    // Upload to other-content bucket by default
+  
+    // Upload to epic-scheduling for Scheduling notes, otherwise other-content
     const uploads =
       noteCategory === "Scheduling"
         ? [{ bucket: "epic-scheduling", folder: "Scheduling_Notes" }]
         : [{ bucket: "other-content", folder: targetFolder }];
-
+  
     try {
+      setKbLoading(true);
+      setKbLoadingMsg("Uploading note to storage...");
+  
       let publicUrl = null;
-
+  
       for (const { bucket, folder } of uploads) {
         const safeFolder = folder.replace(/\//g, "_").replace(/ /g, "_");
         const filePath = `${safeFolder}/${fileName}`;
-
-        // Upload to Supabase Storage
+  
+        // 1) Upload JSON to Supabase Storage
         const { error } = await supabase.storage
           .from(bucket)
           .upload(filePath, blob, { cacheControl: "3600", upsert: true });
-
+  
         if (error) throw error;
-
-        // Get public URL (use the first bucket's URL)
+  
+        // 2) Get public URL (first one only)
         if (!publicUrl) {
-          const { data: urlData } = supabase.storage
-            .from(bucket)
-            .getPublicUrl(filePath);
+          const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(filePath);
           publicUrl = urlData.publicUrl;
         }
-
-        // Convert Blob to File with proper filename
+  
+        // 3) Send to backend /upload to create embeddings
+        setKbLoadingMsg("Creating embeddings and updating knowledge base...");
+  
         const file = new File([blob], fileName, { type: "application/json" });
-
+  
         const formData = new FormData();
         formData.append("file", file);
         formData.append("priority", "1");
         formData.append("path", `${bucket}/${filePath}`);
+  
         if (noteCategory === "Scheduling") {
           formData.append("location", noteLocation);
         }
         if (noteStartDate) formData.append("start_date", toStartISO(noteStartDate));
         if (noteEndDate) formData.append("end_date", toEndISO(noteEndDate));
-
-
-        await fetch("https://sinai-nexus-backend.onrender.com/upload", {
+  
+        const res = await fetch("https://sinai-nexus-backend.onrender.com/upload", {
           method: "POST",
           body: formData,
         });
+  
+        if (!res.ok) {
+          const txt = await res.text().catch(() => "");
+          throw new Error(`upload note failed: ${txt || res.status}`);
+        }
       }
-
+  
       // Add to React state using real Supabase URL
       const newNote = {
         name: fileName,
@@ -351,25 +379,25 @@ function AdminDashboard({ auth }) {
         category: noteCategory,
         url: publicUrl,
       };
-
+  
       setFiles((prev) => [...prev, newNote]);
-
+  
       setAlert({
         open: true,
         msg: "Policy notes successfully uploaded",
         type: "success",
       });
-
-      // Reset
+  
+      // Reset fields
       setNoteTitle("");
       setNoteContent("");
       setNoteCategory("");
       setNoteLocation("");
       setNoteStartDate("");
       setNoteEndDate("");
-
+  
       // Reload lists
-      loadAllFiles();
+      await loadAllFiles();
     } catch (err) {
       console.error(err);
       setAlert({
@@ -377,8 +405,12 @@ function AdminDashboard({ auth }) {
         msg: "Error uploading policy note.",
         type: "error",
       });
+    } finally {
+      setKbLoading(false);
+      setKbLoadingMsg("");
     }
   };
+  
 
   // =========================================================
   // VIEW + DELETE
@@ -714,7 +746,7 @@ function AdminDashboard({ auth }) {
                         <Button
                           variant="contained"
                           component="label"
-                          disabled={!fileType || !fileExtension}
+                          disabled={kbLoading || !fileType || !fileExtension}
                           onClick={() => selectedFile && handleUploadSupabase(selectedFile)}
                           sx={{
                             fontWeight: 800,
@@ -751,6 +783,7 @@ function AdminDashboard({ auth }) {
 
                             <Button
                               fullWidth
+                              disabled={kbLoading}
                               sx={{
                                 mt: "auto",
                                 fontWeight: "bold",
@@ -906,6 +939,7 @@ function AdminDashboard({ auth }) {
                           }}
                           onClick={handleAddPolicy}
                           disabled={
+                            kbLoading || 
                             !noteTitle.trim() ||
                             !noteContent.trim() ||
                             !noteCategory ||
@@ -1175,6 +1209,7 @@ function AdminDashboard({ auth }) {
                   <Box sx={{ p: 2, pt: 1 }}>
                     <Button
                       fullWidth
+                      disabled={kbLoading}
                       sx={{
                         fontWeight: "bold",
                         background: "linear-gradient(90deg, #E41C77, #00ADEF)",
@@ -1215,6 +1250,7 @@ function AdminDashboard({ auth }) {
                   color: "white",
                   fontWeight: "bold",
                 }}
+                disabled={kbLoading}
                 onClick={confirmDelete}
               >
                 Delete
@@ -1230,6 +1266,26 @@ function AdminDashboard({ auth }) {
           >
             <Alert severity={alert.type}>{alert.msg}</Alert>
           </Snackbar>
+
+          <Backdrop
+            open={kbLoading}
+            sx={{
+              zIndex: 9999,
+              color: "#fff",
+              backdropFilter: "blur(6px)",
+              backgroundColor: "rgba(0,0,0,0.35)",
+              flexDirection: "column",
+              gap: 2,
+            }}
+          >
+            <CircularProgress />
+            <Typography sx={{ fontWeight: 800, textAlign: "center" }}>
+              {kbLoadingMsg || "Uploading to Knowledge Base..."}
+            </Typography>
+            <Typography sx={{ opacity: 0.9, textAlign: "center", maxWidth: 460, px: 2 }}>
+              Please don’t close this page. This will finish once the file is stored and embeddings are created.
+            </Typography>
+          </Backdrop>
         </>
       )}
     </Box>
