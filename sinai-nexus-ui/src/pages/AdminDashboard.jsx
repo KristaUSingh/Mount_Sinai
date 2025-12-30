@@ -174,7 +174,9 @@ function AdminDashboard({ auth }) {
       // -----------------------------
       // Post-upload backend processing
       // -----------------------------
-      if (fileType === "Locations/Rooms") {
+      
+      // ONLY trigger GitHub Action for CSV files in Locations/Rooms
+      if (fileType === "Locations/Rooms" && fileExtension === "csv") {
         setKbLoadingMsg("Triggering background processing for scheduling data...");
         
         const res = await fetch("https://sinai-nexus-backend.onrender.com/trigger_csv_processing", {
@@ -204,7 +206,7 @@ function AdminDashboard({ auth }) {
           type: "success",
         });
       } else {
-        // For non-CSV files (PDFs, DOCX, MD), create embeddings
+        // For ALL other files (PDFs, DOCX, MD, and non-Locations/Rooms CSVs), create embeddings
         setKbLoadingMsg("Creating embeddings and updating knowledge base...");
   
         const formData = new FormData();
