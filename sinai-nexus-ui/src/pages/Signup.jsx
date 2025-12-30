@@ -22,7 +22,12 @@ function Signup() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [showAdminCode, setShowAdminCode] = useState(false);
+  const [showAdminCodeField, setShowAdminCodeField] = useState(false);
+  const [selectedRole, setSelectedRole] = useState("");
   const navigate = useNavigate();
+
+  const admin_code = "2025_Sinai_Admin"; 
 
   const test_password = (value) => {
     const newErrors = [];
@@ -35,13 +40,29 @@ function Signup() {
     return newErrors;
   };
 
-  const onSubmit = async ({ firstName, lastName, email, password, role }) => {
+   const handleRoleChange = (e) => {
+    const role = e.target.value;
+    setSelectedRole(role);
+    setShowAdminCodeField(role === "admin"); 
+  };
+
+  const onSubmit = async ({ firstName, lastName, email, password, role, adminCode}) => {
     setError("");
     setSuccess("");
 
     const check_password = test_password(password);
     if (check_password.length > 0) {
       setError("Password must include: " + check_password.join(", "));
+      return;
+    }
+
+    if (!email.endsWith("@mountsinai.org")) {
+    setError("Invalid email. Must use Mount Sinai email account (@mountsinai.org)");
+    return;
+    }
+
+    if (role === "admin" && adminCode !== admin_code) {
+      setError("Invalid admin access code. Please contact your administrator.");
       return;
     }
 
@@ -190,10 +211,37 @@ function Signup() {
               fullWidth
               required
               className="auth-input"
+              onChange={handleRoleChange}
             >
               <MenuItem value="agent">Agent</MenuItem>
               <MenuItem value="admin">Admin</MenuItem>
             </TextField>
+
+            {showAdminCodeField && (
+            <TextField
+              {...register("adminCode")}
+              label="Admin Access Code"
+              type={showAdminCode ? "text" : "password"}
+              fullWidth
+              required
+              className="auth-input"
+              helperText="Enter the admin access code to register as administrator"
+              slotProps={{
+                input: {
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton
+                        onClick={() => setShowAdminCode((p) => !p)}
+                        edge="end"
+                      >
+                        {showAdminCode ? <VisibilityOff /> : <Visibility />}
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                },
+              }}
+            />
+          )}
 
             <Button
               type="submit"
