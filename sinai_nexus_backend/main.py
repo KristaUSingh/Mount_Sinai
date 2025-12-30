@@ -228,25 +228,93 @@ async def upload_file(
 # ===============================================================
 # 3️⃣ Delete File Endpoint
 # ===============================================================
+# ===============================================================
+# 3️⃣ Delete File Endpoint (DELETE EMBEDDINGS + STORAGE OBJECT)
+# ===============================================================
 class DeleteFileRequest(BaseModel):
-    file_path: str
+    file_path: str  # expected like: "other-content/Other/file.pdf"
+
+def _parse_bucket_and_object(file_path: str):
+    """
+    Accepts:
+      - "bucket/folder/file.ext"
+    Returns:
+      (bucket, "folder/file.ext")
+    """
+    fp = (file_path or "").strip().lstrip("/")
+    if "/" not in fp:
+        # fallback: treat as object inside other-content
+        return "other-content", fp
+    bucket, obj = fp.split("/", 1)
+    return bucket, obj
+
+def _storage_remove(bucket: str, obj_path: str):
+    """
+    supabase-py versions differ: from_ vs from
+    """
+    # Try supabase-py v2 style: supabase.storage.from_(bucket)
+    try:
+        return supabase.storage.from_(bucket).remove([obj_path])
+    except Exception:
+        # Try older style: supabase.storage.from(bucket)
+        return supabase.storage.from_(bucket).remove([obj_path])
 
 @app.post("/delete-file")
 async def delete_file(request: DeleteFileRequest):
     """
-    Delete all chunks for a given file_path from Supabase.
+    Deletes:
+      1) All embeddings (rows) for file_path from Supabase `documents`
+      2) The actual file from Supabase Storage bucket
     """
-    print(f"\n🗑️ DELETE REQUEST for file_path: {request.file_path}")
+    file_path = (request.file_path or "").strip()
+    print(f"\n🗑️ DELETE REQUEST for file_path: {file_path}")
 
-    result = supabase.table("documents").delete().eq("file_path", request.file_path).execute()
-    deleted_count = len(result.data) if result.data else 0
+    if not file_path:
+        return {"ok": False, "error": "file_path is required"}
+
+    bucket, obj_path = _parse_bucket_and_object(file_path)
+
+    # 1) Delete embeddings (exact match)
+    deleted_count = 0
+    try:
+        result = supabase.table("documents").delete().eq("file_path", file_path).execute()
+        deleted_count = len(result.data) if result.data else 0
+    except Exception as e:
+        print("❌ documents delete error:", e)
+        return {"ok": False, "error": f"documents delete error: {str(e)}"}
+
+    # Fallback: if older rows stored without bucket prefix, delete those too
+    # Example older: "Other/file.pdf" instead of "other-content/Other/file.pdf"
+    if deleted_count == 0 and obj_path:
+        try:
+            result2 = supabase.table("documents").delete().eq("file_path", obj_path).execute()
+            deleted_count += len(result2.data) if result2.data else 0
+        except Exception as e:
+            print("fallback documents delete error:", e)
 
     print(f"✅ Deleted {deleted_count} rows from documents table")
 
+    # 2) Delete from storage bucket
+    storage_deleted = False
+    storage_error = None
+    try:
+        _storage_remove(bucket, obj_path)
+        storage_deleted = True
+        print(f"✅ Deleted storage object: bucket={bucket}, path={obj_path}")
+    except Exception as e:
+        storage_error = str(e)
+        print("❌ storage remove error:", storage_error)
+
     return {
-        "message": f"Deleted {deleted_count} chunks for {request.file_path}",
-        "count": deleted_count
+        "ok": True,
+        "message": f"Deleted embeddings + storage for {file_path}",
+        "embeddings_deleted": deleted_count,
+        "storage_deleted": storage_deleted,
+        "storage_error": storage_error,
+        "bucket": bucket,
+        "object_path": obj_path,
     }
+
 
 
 

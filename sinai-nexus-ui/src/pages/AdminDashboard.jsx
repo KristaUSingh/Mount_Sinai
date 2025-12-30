@@ -464,7 +464,10 @@ function AdminDashboard({ auth }) {
       return;
     }
   
-    const fullPathWithBucket = `${file.bucket}/${file.fullPath}`; // ✅ FIXED
+    const fullPathWithBucket = file.fullPath?.startsWith(`${file.bucket}/`)
+      ? file.fullPath
+      : `${file.bucket}/${file.fullPath}`;
+
   
     try {
       const res = await fetch("https://sinai-nexus-backend.onrender.com/delete-file", {
