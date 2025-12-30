@@ -90,6 +90,38 @@ const HIDDEN_KB_FILES = new Set([
   "new_scheduling_clean.parquet", // canonical file (hide from UI)
 ]);
 
+const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+
+const parquetNameFromCsv = (csvName) => {
+  const base = (csvName || "").replace(/\.[^/.]+$/, ""); // remove extension
+  return `${base}.parquet`;
+};
+
+const waitForParquetInSupabase = async ({
+  bucket = "epic-scheduling",
+  folder = "Locations_Rooms",
+  expectedNames = [],
+  intervalMs = 4000,
+  timeoutMs = 240000, // 4 min
+}) => {
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    const { data, error } = await supabase.storage.from(bucket).list(folder, { limit: 1000 });
+
+    if (!error && Array.isArray(data)) {
+      const names = new Set(data.map((f) => f.name));
+      const found = expectedNames.find((n) => names.has(n));
+      if (found) return found;
+    }
+
+    await sleep(intervalMs);
+  }
+
+  throw new Error("Parquet not detected in Supabase yet. Check GitHub Actions logs.");
+};
+
+
 
 
 function AdminDashboard({ auth }) {
@@ -123,6 +155,8 @@ function AdminDashboard({ auth }) {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [kbLoading, setKbLoading] = useState(false);
   const [kbLoadingMsg, setKbLoadingMsg] = useState("");
+  const [kbLoadingSubMsg, setKbLoadingSubMsg] = useState("");
+
 
 
   useEffect(() => {
@@ -177,32 +211,52 @@ function AdminDashboard({ auth }) {
       
       // ONLY trigger GitHub Action for CSV files in Locations/Rooms
       if (fileType === "Locations/Rooms" && fileExtension === "csv") {
-        setKbLoadingMsg("Triggering background processing for scheduling data...");
-        
+        // Expected parquet names
+        const expectedNamedParquet = parquetNameFromCsv(file.name); // e.g. All_Exams_locations_trial.parquet
+        const canonicalParquet = "new_scheduling_clean.parquet"; // your stable hidden file
+      
+        setKbLoadingMsg("Triggering CSV processing workflow...");
+        setKbLoadingSubMsg("Starting the background job that converts CSV → Parquet.");
+      
         const res = await fetch("https://sinai-nexus-backend.onrender.com/trigger_csv_processing", {
           method: "POST",
-          body: JSON.stringify({ file_path: filePath }), // Just filePath, not fullPath
+          body: JSON.stringify({ file_path: filePath }), // "Locations_Rooms/whatever.csv"
           headers: {
             "Content-Type": "application/json",
             Accept: "application/json",
           },
         });
-  
+      
         if (!res.ok) {
           const txt = await res.text().catch(() => "");
           throw new Error(`Failed to trigger processing: ${txt || res.status}`);
         }
-        
+      
         const responseData = await res.json();
         console.log("🟢 trigger_csv_processing response:", responseData);
-        
+      
         if (!responseData.ok) {
           throw new Error(responseData.error || "Unknown error");
         }
-  
+      
+        // ✅ Keep loading screen open while conversion happens
+        setKbLoadingMsg("Converting CSV → Parquet...");
+        setKbLoadingSubMsg("We’re waiting for the Parquet file to be uploaded back into Supabase Storage.");
+      
+        const found = await waitForParquetInSupabase({
+          bucket: "epic-scheduling",
+          folder: "Locations_Rooms",
+          expectedNames: [expectedNamedParquet, canonicalParquet],
+        });
+      
+        setKbLoadingMsg("Parquet uploaded! Refreshing Knowledge Base...");
+        setKbLoadingSubMsg(`Detected: ${found}. Updating the file list now...`);
+      
+        await loadAllFiles();
+      
         setAlert({
           open: true,
-          msg: "CSV uploaded! Processing will complete in 1-2 minutes. Refresh to see the parquet file.",
+          msg: `CSV processed successfully! Parquet is now available (${found}).`,
           type: "success",
         });
       } else {
@@ -265,6 +319,7 @@ function AdminDashboard({ auth }) {
     } finally {
       setKbLoading(false);
       setKbLoadingMsg("");
+      setKbLoadingSubMsg("");
     }
   };
 
@@ -1300,7 +1355,8 @@ function AdminDashboard({ auth }) {
               {kbLoadingMsg || "Uploading to Knowledge Base..."}
             </Typography>
             <Typography sx={{ opacity: 0.9, textAlign: "center", maxWidth: 460, px: 2 }}>
-              Please don’t close this page. This will finish once the file is stored and embeddings are created.
+              {kbLoadingSubMsg || 
+                "Please don’t close this page. This will finish once the file is stored and embeddings are created."}
             </Typography>
           </Backdrop>
         </>
