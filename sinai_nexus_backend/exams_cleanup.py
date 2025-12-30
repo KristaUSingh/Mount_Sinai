@@ -1,6 +1,13 @@
 # -------------------------------------------------------------
 # exams_cleanup.py
 # -------------------------------------------------------------
+# Robust CSV → Parquet cleaner for Sinai scheduling exports
+# Works with BOTH:
+#   - Old format:  EAP Name, DEP Name, Room Name...
+#   - New format:  Procedure Name, Department Name, Resource Name...
+# Also fixes UTF-8 BOM issues that show up as "ï»¿" in the first column.
+# -------------------------------------------------------------
+
 from supabase import create_client
 import pandas as pd
 from io import StringIO, BytesIO
@@ -9,12 +16,15 @@ import os
 
 load_dotenv()
 
+# -------------------------------------------------------------
+# Step 1 — Load configuration
+# -------------------------------------------------------------
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 CSV_FILE_PATH = os.getenv("CSV_FILE_PATH", "Locations_Rooms/scheduling.csv")
 
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-    raise Exception("Missing SUPABASE_URL or SUPABASE_SERVICE_KEY")
+    raise Exception("Missing SUPABASE_URL or SUPABASE_SERVICE_KEY environment variables")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
@@ -23,28 +33,36 @@ file_path = CSV_FILE_PATH
 
 print(f"📥 Downloading CSV from: {bucket_name}/{file_path}")
 
-# ---- Download CSV
+# -------------------------------------------------------------
+# Step 2 — Download CSV from Supabase
+# -------------------------------------------------------------
 response = supabase.storage.from_(bucket_name).download(file_path)
+
 if not response:
     raise Exception("Could not download file from Supabase")
 
-csv_string = response.decode("latin-1", errors="ignore")
+# ✅ Decode in a BOM-safe way (prevents ï»¿ showing up in headers)
+csv_string = response.decode("utf-8-sig", errors="replace")
 df = pd.read_csv(StringIO(csv_string))
 
 print(f"✅ CSV loaded: {len(df)} rows")
 print("🔎 Raw columns:", list(df.columns))
 
-# ---- Normalize column names (strip spaces + remove BOM)
-df.columns = [c.replace("\ufeff", "").strip() for c in df.columns]
+# -------------------------------------------------------------
+# Step 3 — Normalize headers (extra safety)
+# -------------------------------------------------------------
+df.columns = [
+    str(c).replace("\ufeff", "").replace("ï»¿", "").strip()
+    for c in df.columns
+]
 print("🧼 Normalized columns:", list(df.columns))
 
-# ---- Flexible column mapping (supports old & new formats)
-# Priority: if the "old" names already exist, keep them.
-col_map = {}
-
-def pick(existing, *candidates):
+# -------------------------------------------------------------
+# Step 4 — Flexible mapping (supports old OR new format)
+# -------------------------------------------------------------
+def pick(existing_cols, *candidates):
     for c in candidates:
-        if c in existing:
+        if c in existing_cols:
             return c
     return None
 
@@ -58,13 +76,13 @@ vl_src   = pick(cols, "Visit Type Length", "Visit Length", "Duration", "VisitTyp
 
 missing = [("EAP", eap_src), ("DEP", dep_src), ("ROOM", room_src), ("VT", vt_src), ("VL", vl_src)]
 missing = [name for name, src in missing if src is None]
+
 if missing:
     raise Exception(
-        f"Missing required columns: {missing}. "
-        f"Found columns: {list(df.columns)}"
+        f"Missing required columns: {missing}. Found columns: {list(df.columns)}"
     )
 
-# Rename selected sources to canonical names
+# Rename selected sources to canonical names your backend expects
 df = df.rename(columns={
     eap_src: "EAP Name",
     dep_src: "DEP Name",
@@ -73,18 +91,26 @@ df = df.rename(columns={
     vl_src: "Visit Type Length",
 })
 
-# ---- Split multiline cells
+# -------------------------------------------------------------
+# Step 5 — Convert multi-line cells into lists
+# -------------------------------------------------------------
 df["DEP Name"] = df["DEP Name"].astype(str).str.split("\n")
 df["Room Name"] = df["Room Name"].astype(str).str.split("\n")
 
-# ---- Explode
+# -------------------------------------------------------------
+# Step 6 — Explode lists into separate rows
+# -------------------------------------------------------------
 df = df.explode("DEP Name").explode("Room Name").reset_index(drop=True)
 
-# ---- Strip
+# -------------------------------------------------------------
+# Step 7 — Strip whitespace
+# -------------------------------------------------------------
 df["DEP Name"] = df["DEP Name"].astype(str).str.strip()
 df["Room Name"] = df["Room Name"].astype(str).str.strip()
 
-# ---- Keep only needed columns
+# -------------------------------------------------------------
+# Step 8 — Keep only needed columns
+# -------------------------------------------------------------
 df = df[[
     "EAP Name",
     "Visit Type Name",
@@ -95,12 +121,19 @@ df = df[[
 
 print(f"✅ Data processed: {len(df)} rows after expansion")
 
-# ---- Save to parquet in-memory
+# -------------------------------------------------------------
+# Step 9 — Save as Parquet in memory
+# -------------------------------------------------------------
 buffer = BytesIO()
 df.to_parquet(buffer, index=False)
 buffer.seek(0)
 
-# ✅ Use canonical parquet name your app expects (recommended)
+print("✅ Parquet generated in memory")
+
+# -------------------------------------------------------------
+# Step 10 — Upload Parquet to Supabase Storage
+# -------------------------------------------------------------
+# ✅ Upload to the canonical file your app hides + expects
 parquet_path = "Locations_Rooms/new_scheduling_clean.parquet"
 
 supabase.storage.from_(bucket_name).upload(
