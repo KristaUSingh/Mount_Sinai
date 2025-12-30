@@ -19,6 +19,8 @@ from typing import Optional
 
 from unstructured.partition.auto import partition
 from supabase import create_client
+import pdfplumber
+from pathlib import Path
 
 
 # ------------------------------
@@ -137,6 +139,26 @@ def agent_chat(payload: AgentChatRequest):
     except Exception as e:
         return {"answer": f"Error: {str(e)}"}
 
+
+
+
+def extract_text_from_file(local_path: str, filename: str, content_type: str | None = None) -> str:
+    ext = Path(filename).suffix.lower()
+
+    # ✅ PDFs → pdfplumber (fast, pure python, no poppler needed)
+    if ext == ".pdf" or (content_type and "pdf" in content_type.lower()):
+        with pdfplumber.open(local_path) as pdf:
+            texts = []
+            for page in pdf.pages:
+                t = page.extract_text() or ""
+                if t.strip():
+                    texts.append(t)
+        return "\n\n".join(texts).strip()
+
+    # ✅ Everything else → unstructured
+    elements = partition(filename=local_path)
+    return "\n".join([el.text for el in elements if getattr(el, "text", None)]).strip()
+
 # ===============================================================
 # 2️⃣ Upload → Parse → Chunk → Embed → Insert into Supabase
 # ===============================================================
@@ -154,23 +176,13 @@ async def upload_file(
     priority = 1 (highest), 2, or 3 (lowest, default)
     JSON notes in Other_Notes folder are automatically priority 1.
     """
-    
-    print(f"📥 Uploading file: {file.filename}")
-    print(f"📄 Content type: {file.content_type}")
-    print(f"📍 Storage path: {path}")
 
     os.makedirs("uploads", exist_ok=True)
     local_path = f"uploads/{file.filename}"
 
     # Save File
-    try:
-        content = await file.read()
-        with open(local_path, "wb") as f:
-            f.write(content)
-        print(f"✅ File saved to: {local_path} ({len(content)} bytes)")
-    except Exception as e:
-        print(f"❌ Error saving file: {str(e)}")
-        return {"error": f"Failed to save file: {str(e)}", "success": False}
+    with open(local_path, "wb") as f:
+        f.write(await file.read())
 
     # Use the path sent from frontend if provided, otherwise use filename
     storage_path = path if path else f"other-content/{file.filename}"
@@ -181,59 +193,29 @@ async def upload_file(
     if is_note:
         # Automatic priority 1 for notes
         priority = 1
-        try:
-            with open(local_path, "r") as f:
-                data = json.load(f)
+        with open(local_path, "r") as f:
+            data = json.load(f)
 
-            # Combine title and content for better semantic search
-            title = data.get("title", "")
-            content = data.get("content", "")
+        # Combine title and content for better semantic search
+        title = data.get("title", "")
+        content = data.get("content", "")
 
-            # Format: "Title\n\nContent" so both are searchable
-            text = f"{title}\n\n{content}" if title else content
-            chunks = [text] if text else []
-            print(f"✅ Processed JSON note: {len(chunks)} chunk(s)")
-        except Exception as e:
-            print(f"❌ Error processing JSON note: {str(e)}")
-            return {"error": f"Failed to process JSON note: {str(e)}", "success": False}
+        # Format: "Title\n\nContent" so both are searchable
+        text = f"{title}\n\n{content}" if title else content
+        chunks = [text] if text else []
     else:
-        # Use unstructured partition for PDFs, DOCX, Markdown, TXT
-        try:
-            print(f"📖 Parsing document with unstructured.partition...")
-            elements = partition(filename=local_path)
-            print(f"✅ Parsed {len(elements)} elements")
-            
-            text = "\n".join([el.text for el in elements if el.text])
-            print(f"✅ Extracted {len(text)} characters of text")
-            
-            if not text:
-                print("⚠️ Warning: No text extracted from document")
-                return {"error": "No text could be extracted from the document", "success": False}
-            
-        except Exception as e:
-            print(f"❌ Error parsing document: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return {"error": f"Failed to parse document: {str(e)}", "success": False}
+        text = extract_text_from_file(local_path, file.filename, file.content_type)
 
-        # Chunking
         chunk_size = 600
         overlap = 80
-        chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size - overlap)] if text else []
-        print(f"✅ Created {len(chunks)} chunk(s)")
+        chunks = (
+            [text[i:i + chunk_size] for i in range(0, len(text), chunk_size - overlap)]
+            if text else []
+        )
 
-    if not chunks:
-        print("⚠️ No chunks created from document")
-        return {"error": "No content could be extracted from the file", "success": False}
 
     # Embed Chunks (HF Inference API)
-    try:
-        print(f"🔮 Creating embeddings for {len(chunks)} chunk(s)...")
-        embeddings = hf_embed(chunks)
-        print(f"✅ Created {len(embeddings)} embedding(s)")
-    except Exception as e:
-        print(f"❌ Error creating embeddings: {str(e)}")
-        return {"error": f"Failed to create embeddings: {str(e)}", "success": False}
+    embeddings = hf_embed(chunks)
 
     rows = []
     for chunk, emb_vector in zip(chunks, embeddings):
@@ -258,18 +240,11 @@ async def upload_file(
         rows.append(row)
 
     if rows:
-        try:
-            print(f"💾 Inserting {len(rows)} row(s) into Supabase...")
-            supabase.table("documents").insert(rows).execute()
-            print(f"✅ Successfully inserted into database")
-        except Exception as e:
-            print(f"❌ Error inserting into database: {str(e)}")
-            return {"error": f"Failed to insert into database: {str(e)}", "success": False}
+        supabase.table("documents").insert(rows).execute()
 
     return {
         "message": f"Inserted {len(chunks)} chunks into Supabase",
-        "chunks_added": len(chunks),
-        "success": True
+        "chunks_added": len(chunks)
     }
 
 
@@ -491,6 +466,8 @@ Question:
     response = model.generate_content(prompt)
 
     return {"answer": response.text.strip()}
+
+
 
 # Add this model near the top with your other models
 class TriggerWorkflowRequest(BaseModel):

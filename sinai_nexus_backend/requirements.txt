@@ -8,21 +8,7 @@ rapidfuzz
 google-generativeai
 python-multipart
 scikit-learn
-
-# Document parsing - ALL file types
-unstructured[pdf]
+pdfplumber>=0.11.8
 unstructured[docx]
-pdfminer.six
-pillow
-pypdf
-python-docx
-markdown
-
-# Supabase
 supabase
-
-# HuggingFace
 huggingface_hub>=0.23.0
-
-# HTTP requests
-requests
