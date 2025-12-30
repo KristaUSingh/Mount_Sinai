@@ -154,13 +154,23 @@ async def upload_file(
     priority = 1 (highest), 2, or 3 (lowest, default)
     JSON notes in Other_Notes folder are automatically priority 1.
     """
+    
+    print(f"📥 Uploading file: {file.filename}")
+    print(f"📄 Content type: {file.content_type}")
+    print(f"📍 Storage path: {path}")
 
     os.makedirs("uploads", exist_ok=True)
     local_path = f"uploads/{file.filename}"
 
     # Save File
-    with open(local_path, "wb") as f:
-        f.write(await file.read())
+    try:
+        content = await file.read()
+        with open(local_path, "wb") as f:
+            f.write(content)
+        print(f"✅ File saved to: {local_path} ({len(content)} bytes)")
+    except Exception as e:
+        print(f"❌ Error saving file: {str(e)}")
+        return {"error": f"Failed to save file: {str(e)}", "success": False}
 
     # Use the path sent from frontend if provided, otherwise use filename
     storage_path = path if path else f"other-content/{file.filename}"
@@ -171,28 +181,59 @@ async def upload_file(
     if is_note:
         # Automatic priority 1 for notes
         priority = 1
-        with open(local_path, "r") as f:
-            data = json.load(f)
+        try:
+            with open(local_path, "r") as f:
+                data = json.load(f)
 
-        # Combine title and content for better semantic search
-        title = data.get("title", "")
-        content = data.get("content", "")
+            # Combine title and content for better semantic search
+            title = data.get("title", "")
+            content = data.get("content", "")
 
-        # Format: "Title\n\nContent" so both are searchable
-        text = f"{title}\n\n{content}" if title else content
-        chunks = [text] if text else []
+            # Format: "Title\n\nContent" so both are searchable
+            text = f"{title}\n\n{content}" if title else content
+            chunks = [text] if text else []
+            print(f"✅ Processed JSON note: {len(chunks)} chunk(s)")
+        except Exception as e:
+            print(f"❌ Error processing JSON note: {str(e)}")
+            return {"error": f"Failed to process JSON note: {str(e)}", "success": False}
     else:
         # Use unstructured partition for PDFs, DOCX, Markdown, TXT
-        elements = partition(filename=local_path)
-        text = "\n".join([el.text for el in elements if el.text])
+        try:
+            print(f"📖 Parsing document with unstructured.partition...")
+            elements = partition(filename=local_path)
+            print(f"✅ Parsed {len(elements)} elements")
+            
+            text = "\n".join([el.text for el in elements if el.text])
+            print(f"✅ Extracted {len(text)} characters of text")
+            
+            if not text:
+                print("⚠️ Warning: No text extracted from document")
+                return {"error": "No text could be extracted from the document", "success": False}
+            
+        except Exception as e:
+            print(f"❌ Error parsing document: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {"error": f"Failed to parse document: {str(e)}", "success": False}
 
         # Chunking
         chunk_size = 600
         overlap = 80
         chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size - overlap)] if text else []
+        print(f"✅ Created {len(chunks)} chunk(s)")
+
+    if not chunks:
+        print("⚠️ No chunks created from document")
+        return {"error": "No content could be extracted from the file", "success": False}
 
     # Embed Chunks (HF Inference API)
-    embeddings = hf_embed(chunks)
+    try:
+        print(f"🔮 Creating embeddings for {len(chunks)} chunk(s)...")
+        embeddings = hf_embed(chunks)
+        print(f"✅ Created {len(embeddings)} embedding(s)")
+    except Exception as e:
+        print(f"❌ Error creating embeddings: {str(e)}")
+        return {"error": f"Failed to create embeddings: {str(e)}", "success": False}
 
     rows = []
     for chunk, emb_vector in zip(chunks, embeddings):
@@ -217,11 +258,18 @@ async def upload_file(
         rows.append(row)
 
     if rows:
-        supabase.table("documents").insert(rows).execute()
+        try:
+            print(f"💾 Inserting {len(rows)} row(s) into Supabase...")
+            supabase.table("documents").insert(rows).execute()
+            print(f"✅ Successfully inserted into database")
+        except Exception as e:
+            print(f"❌ Error inserting into database: {str(e)}")
+            return {"error": f"Failed to insert into database: {str(e)}", "success": False}
 
     return {
         "message": f"Inserted {len(chunks)} chunks into Supabase",
-        "chunks_added": len(chunks)
+        "chunks_added": len(chunks),
+        "success": True
     }
 
 
