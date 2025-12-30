@@ -1,13 +1,6 @@
 # -------------------------------------------------------------
 # exams_cleanup.py
 # -------------------------------------------------------------
-# Robust CSV → Parquet cleaner for Sinai scheduling exports
-# Works with BOTH:
-#   - Old format:  EAP Name, DEP Name, Room Name...
-#   - New format:  Procedure Name, Department Name, Resource Name...
-# Also fixes UTF-8 BOM issues that show up as "ï»¿" in the first column.
-# -------------------------------------------------------------
-
 from supabase import create_client
 import pandas as pd
 from io import StringIO, BytesIO
@@ -26,6 +19,11 @@ CSV_FILE_PATH = os.getenv("CSV_FILE_PATH", "Locations_Rooms/scheduling.csv")
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
     raise Exception("Missing SUPABASE_URL or SUPABASE_SERVICE_KEY environment variables")
 
+# Optional: remove the warning about trailing slash
+# (won't fix your crash, but cleans logs)
+if SUPABASE_URL and not SUPABASE_URL.endswith("/"):
+    SUPABASE_URL = SUPABASE_URL + "/"
+
 supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 bucket_name = "epic-scheduling"
@@ -37,11 +35,10 @@ print(f"📥 Downloading CSV from: {bucket_name}/{file_path}")
 # Step 2 — Download CSV from Supabase
 # -------------------------------------------------------------
 response = supabase.storage.from_(bucket_name).download(file_path)
-
 if not response:
     raise Exception("Could not download file from Supabase")
 
-# ✅ Decode in a BOM-safe way (prevents ï»¿ showing up in headers)
+# ✅ Decode in a BOM-safe way
 csv_string = response.decode("utf-8-sig", errors="replace")
 df = pd.read_csv(StringIO(csv_string))
 
@@ -76,13 +73,9 @@ vl_src   = pick(cols, "Visit Type Length", "Visit Length", "Duration", "VisitTyp
 
 missing = [("EAP", eap_src), ("DEP", dep_src), ("ROOM", room_src), ("VT", vt_src), ("VL", vl_src)]
 missing = [name for name, src in missing if src is None]
-
 if missing:
-    raise Exception(
-        f"Missing required columns: {missing}. Found columns: {list(df.columns)}"
-    )
+    raise Exception(f"Missing required columns: {missing}. Found columns: {list(df.columns)}")
 
-# Rename selected sources to canonical names your backend expects
 df = df.rename(columns={
     eap_src: "EAP Name",
     dep_src: "DEP Name",
@@ -127,21 +120,20 @@ print(f"✅ Data processed: {len(df)} rows after expansion")
 buffer = BytesIO()
 df.to_parquet(buffer, index=False)
 buffer.seek(0)
-
 print("✅ Parquet generated in memory")
 
 # -------------------------------------------------------------
 # Step 10 — Upload Parquet to Supabase Storage
 # -------------------------------------------------------------
-# ✅ Upload to the canonical file your app hides + expects
 parquet_path = "Locations_Rooms/new_scheduling_clean.parquet"
 
+# ✅ IMPORTANT: upsert must be a STRING (headers can't be bool)
 supabase.storage.from_(bucket_name).upload(
     parquet_path,
     buffer.getvalue(),
     file_options={
         "content-type": "application/vnd.apache.parquet",
-        "upsert": True
+        "upsert": "true",
     }
 )
 
