@@ -103,6 +103,7 @@ const waitForParquetInSupabase = async ({
   expectedNames = [],
   intervalMs = 4000,
   timeoutMs = 240000, // 4 min
+  minUpdatedAtMs = 0, // ✅ only accept files updated after this time
 }) => {
   const start = Date.now();
 
@@ -110,9 +111,19 @@ const waitForParquetInSupabase = async ({
     const { data, error } = await supabase.storage.from(bucket).list(folder, { limit: 1000 });
 
     if (!error && Array.isArray(data)) {
-      const names = new Set(data.map((f) => f.name));
-      const found = expectedNames.find((n) => names.has(n));
-      if (found) return found;
+      // Supabase returns objects like: { name, updated_at, created_at, ... }
+      const candidates = data.filter((f) => expectedNames.includes(f.name));
+
+      // ✅ Require “fresh” upload/update after the trigger time
+      const fresh = candidates.find((f) => {
+        const t =
+          (f.updated_at && Date.parse(f.updated_at)) ||
+          (f.created_at && Date.parse(f.created_at)) ||
+          0;
+        return t >= minUpdatedAtMs;
+      });
+
+      if (fresh) return fresh.name;
     }
 
     await sleep(intervalMs);
@@ -211,20 +222,19 @@ function AdminDashboard({ auth }) {
       
       // ONLY trigger GitHub Action for CSV files in Locations/Rooms
       if (fileType === "Locations/Rooms" && fileExtension === "csv") {
-        // Expected parquet names
-        const expectedNamedParquet = parquetNameFromCsv(file.name); // e.g. All_Exams_locations_trial.parquet
-        const canonicalParquet = "new_scheduling_clean.parquet"; // your stable hidden file
+        const startMs = Date.now(); // ✅ record when we started this job
+      
+        // filePath looks like: "Locations_Rooms/MyFile.csv"
+        const csvFilename = filePath.split("/").pop(); // "MyFile.csv"
+        const expectedNamedParquet = parquetNameFromCsv(csvFilename); // "MyFile.parquet"
       
         setKbLoadingMsg("Triggering CSV processing workflow...");
         setKbLoadingSubMsg("Starting the background job that converts CSV → Parquet.");
       
         const res = await fetch("https://sinai-nexus-backend.onrender.com/trigger_csv_processing", {
           method: "POST",
-          body: JSON.stringify({ file_path: filePath }), // "Locations_Rooms/whatever.csv"
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
+          body: JSON.stringify({ file_path: filePath }),
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
         });
       
         if (!res.ok) {
@@ -233,20 +243,17 @@ function AdminDashboard({ auth }) {
         }
       
         const responseData = await res.json();
-        console.log("🟢 trigger_csv_processing response:", responseData);
+        if (!responseData.ok) throw new Error(responseData.error || "Unknown error");
       
-        if (!responseData.ok) {
-          throw new Error(responseData.error || "Unknown error");
-        }
-      
-        // ✅ Keep loading screen open while conversion happens
         setKbLoadingMsg("Converting CSV → Parquet...");
-        setKbLoadingSubMsg("We’re waiting for the Parquet file to be uploaded back into Supabase Storage.");
+        setKbLoadingSubMsg(`Waiting for: ${expectedNamedParquet} to appear in Supabase Storage...`);
       
+        // ✅ ONLY wait for the parquet that matches this CSV name + was uploaded after trigger time
         const found = await waitForParquetInSupabase({
           bucket: "epic-scheduling",
           folder: "Locations_Rooms",
-          expectedNames: [expectedNamedParquet, canonicalParquet],
+          expectedNames: [expectedNamedParquet],
+          minUpdatedAtMs: startMs,
         });
       
         setKbLoadingMsg("Parquet uploaded! Refreshing Knowledge Base...");
