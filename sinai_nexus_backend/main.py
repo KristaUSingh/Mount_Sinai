@@ -444,6 +444,60 @@ Question:
 
     return {"answer": response.text.strip()}
 
+# Add this model near the top with your other models
+class TriggerWorkflowRequest(BaseModel):
+    file_path: str  # e.g., "Locations_Rooms/scheduling.csv"
+
+# Add this endpoint before your health check endpoints
+@app.post("/trigger_csv_processing")
+async def trigger_csv_processing(request: TriggerWorkflowRequest):
+    """
+    Triggers GitHub Action to process CSV → Parquet conversion
+    """
+    try:
+        GITHUB_TOKEN = os.getenv("GH_WORKFLOW_TOKEN")
+        GITHUB_REPO = os.getenv("GH_REPO")  # Should be "KristalSingh/Mount_Sinai"
+        
+        if not GITHUB_TOKEN or not GITHUB_REPO:
+            return {
+                "ok": False,
+                "error": "GitHub integration not configured. Missing GH_WORKFLOW_TOKEN or GH_REPO."
+            }
+        
+        # Trigger workflow dispatch
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/actions/workflows/process_scheduling_csv.yml/dispatches"
+        
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {GITHUB_TOKEN}",
+            "X-GitHub-Api-Version": "2022-11-28"
+        }
+        
+        payload = {
+            "ref": "main",  # Change to "master" if that's your default branch
+            "inputs": {
+                "file_path": request.file_path
+            }
+        }
+        
+        response = requests.post(url, json=payload, headers=headers)
+        
+        if response.status_code == 204:
+            return {
+                "ok": True,
+                "message": "CSV processing workflow triggered successfully",
+                "file_path": request.file_path
+            }
+        else:
+            return {
+                "ok": False,
+                "error": f"GitHub API error: {response.status_code} - {response.text}"
+            }
+            
+    except Exception as e:
+        print(f"❌ Error triggering workflow: {str(e)}")
+        return {"ok": False, "error": str(e)}
+
 # ===============================================================
 # 5️⃣ HEALTH CHECK
 # ===============================================================

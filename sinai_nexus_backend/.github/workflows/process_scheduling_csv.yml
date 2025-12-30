@@ -1,0 +1,36 @@
+name: Process Scheduling CSV
+
+on:
+  workflow_dispatch:
+    inputs:
+      file_path:
+        description: 'Path to CSV file in Supabase (e.g., Locations_Rooms/scheduling.csv)'
+        required: true
+        type: string
+
+jobs:
+  process-csv:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          cd sinai_nexus_backend
+          pip install pandas pyarrow supabase python-dotenv
+      
+      - name: Run exams_cleanup.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          CSV_FILE_PATH: ${{ inputs.file_path }}
+        run: |
+          cd sinai_nexus_backend
+          python exams_cleanup.py

@@ -174,37 +174,35 @@ function AdminDashboard({ auth }) {
       // -----------------------------
       // Post-upload backend processing
       // -----------------------------
+      // In handleUploadSupabase function, replace the exams_cleanup section:
+
       if (fileType === "Locations/Rooms") {
-        setKbLoadingMsg("Updating scheduling index (Locations/Rooms)...");
-        const res = await fetch("https://sinai-nexus-backend.onrender.com/exams_cleanup", {
+        setKbLoadingMsg("Triggering background processing for scheduling data...");
+        
+        const res = await fetch("https://sinai-nexus-backend.onrender.com/trigger_csv_processing", {
           method: "POST",
-          body: JSON.stringify({ file_path: fullPath }),
+          body: JSON.stringify({ file_path: filePath }),
           headers: {
             "Content-Type": "application/json",
             Accept: "application/json",
           },
         });
-  
+
         if (!res.ok) {
           const txt = await res.text().catch(() => "");
-          throw new Error(`exams_cleanup failed: ${txt || res.status}`);
+          throw new Error(`Failed to trigger processing: ${txt || res.status}`);
         }
-      } else {
-        setKbLoadingMsg("Creating embeddings and updating knowledge base...");
-  
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("priority", "3");
-        formData.append("path", fullPath);
-  
-        const res = await fetch("https://sinai-nexus-backend.onrender.com/upload", {
-          method: "POST",
-          body: formData,
-        });
-  
-        if (!res.ok) {
-          const txt = await res.text().catch(() => "");
-          throw new Error(`upload failed: ${txt || res.status}`);
+        
+        const data = await res.json();
+        
+        if (data.ok) {
+          setAlert({
+            open: true,
+            msg: "CSV uploaded! Processing will complete in 1-2 minutes. The parquet file will appear automatically.",
+            type: "success",
+          });
+        } else {
+          throw new Error(data.error || "Unknown error");
         }
       }
   
